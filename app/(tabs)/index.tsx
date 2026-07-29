@@ -1,98 +1,372 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+} from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
-
-export default function HomeScreen() {
+export default function Dashboard() {
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <ScrollView
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Header */}
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.greeting}>
+            👋 Welcome Back
+          </Text>
+
+          <Text style={styles.username}>
+            Kunal
+          </Text>
+        </View>
+
+        <View style={styles.profileCircle}>
+          <Text style={styles.profileText}>
+            K
+          </Text>
+        </View>
+      </View>
+
+      {/* Stats */}
+
+      <View style={styles.statsContainer}>
+        <View style={styles.card}>
+          <Ionicons
+            name="business"
+            size={24}
+            color="#3B82F6"
+          />
+          <Text style={styles.cardTitle}>
+            Rooms
+          </Text>
+          <Text style={styles.cardValue}>
+            25
+          </Text>
+        </View>
+
+        <View style={styles.card}>
+          <Ionicons
+            name="people"
+            size={24}
+            color="#10B981"
+          />
+          <Text style={styles.cardTitle}>
+            Tenants
+          </Text>
+          <Text style={styles.cardValue}>
+            78
+          </Text>
+        </View>
+
+        <View style={styles.card}>
+          <Ionicons
+            name="bed"
+            size={24}
+            color="#F59E0B"
+          />
+          <Text style={styles.cardTitle}>
+            Occupied
+          </Text>
+          <Text style={styles.cardValue}>
+            65
+          </Text>
+        </View>
+
+        <View style={styles.card}>
+          <Ionicons
+            name="checkmark-circle"
+            size={24}
+            color="#22C55E"
+          />
+          <Text style={styles.cardTitle}>
+            Vacant
+          </Text>
+          <Text style={styles.cardValue}>
+            15
+          </Text>
+        </View>
+      </View>
+
+      {/* Occupancy */}
+
+      <View style={styles.occupancyCard}>
+        <Text style={styles.sectionTitle}>
+          Occupancy Rate
+        </Text>
+
+        <View style={styles.progressBg}>
+          <View
+            style={styles.progressFill}
+          />
+        </View>
+
+        <Text style={styles.occupancyText}>
+          81% Occupied
+        </Text>
+      </View>
+
+      {/* Revenue */}
+
+      <View style={styles.revenueCard}>
+        <Text style={styles.revenueLabel}>
+          Monthly Revenue
+        </Text>
+
+        <Text style={styles.revenueAmount}>
+          ₹85,000
+        </Text>
+
+        <Text style={styles.pendingText}>
+          Pending Rent ₹12,000
+        </Text>
+      </View>
+
+      {/* Quick Actions */}
+
+      <Text style={styles.sectionTitle}>
+        Quick Actions
+      </Text>
+
+      <View style={styles.actionContainer}>
+        <TouchableOpacity
+          style={styles.actionCard}
+        >
+          <Ionicons
+            name="person-add"
+            size={28}
+            color="#fff"
+          />
+          <Text style={styles.actionText}>
+            Add Tenant
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.actionCard}
+        >
+          <Ionicons
+            name="home"
+            size={28}
+            color="#fff"
+          />
+          <Text style={styles.actionText}>
+            Add Room
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.actionCard}
+        >
+          <Ionicons
+            name="key"
+            size={28}
+            color="#fff"
+          />
+          <Text style={styles.actionText}>
+            Allocate
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.actionCard}
+        >
+          <Ionicons
+            name="cash"
+            size={28}
+            color="#fff"
+          />
+          <Text style={styles.actionText}>
+            Collect Rent
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Recent Activity */}
+
+      <Text style={styles.sectionTitle}>
+        Recent Activity
+      </Text>
+
+      <View style={styles.activityCard}>
+        <Text style={styles.activityText}>
+          👤 Rahul joined Room 101
+        </Text>
+
+        <Text style={styles.activityText}>
+          💰 Rent received ₹5000
+        </Text>
+
+        <Text style={styles.activityText}>
+          🛏 Bed A3 allocated
+        </Text>
+
+        <Text style={styles.activityText}>
+          ⚠ Complaint submitted
+        </Text>
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
+    backgroundColor: "#0F172A",
+    padding: 20,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 40,
+    marginBottom: 25,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+
+  greeting: {
+    color: "#94A3B8",
+    fontSize: 16,
+  },
+
+  username: {
+    color: "#fff",
+    fontSize: 30,
+    fontWeight: "bold",
+  },
+
+  profileCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#2563EB",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  profileText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 18,
+  },
+
+  statsContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+
+  card: {
+    width: "48%",
+    backgroundColor: "#1E293B",
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 15,
+  },
+
+  cardTitle: {
+    color: "#94A3B8",
+    marginTop: 10,
+  },
+
+  cardValue: {
+    color: "#fff",
+    fontSize: 28,
+    fontWeight: "bold",
+    marginTop: 8,
+  },
+
+  occupancyCard: {
+    backgroundColor: "#1E293B",
+    padding: 20,
+    borderRadius: 20,
+    marginBottom: 20,
+  },
+
+  sectionTitle: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 15,
+  },
+
+  progressBg: {
+    height: 10,
+    backgroundColor: "#334155",
+    borderRadius: 10,
+  },
+
+  progressFill: {
+    width: "81%",
+    height: 10,
+    backgroundColor: "#22C55E",
+    borderRadius: 10,
+  },
+
+  occupancyText: {
+    color: "#94A3B8",
+    marginTop: 10,
+  },
+
+  revenueCard: {
+    backgroundColor: "#2563EB",
+    padding: 25,
+    borderRadius: 20,
+    marginBottom: 25,
+  },
+
+  revenueLabel: {
+    color: "#DBEAFE",
+    fontSize: 16,
+  },
+
+  revenueAmount: {
+    color: "#fff",
+    fontSize: 34,
+    fontWeight: "bold",
+    marginTop: 10,
+  },
+
+  pendingText: {
+    color: "#DBEAFE",
+    marginTop: 10,
+  },
+
+  actionContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+
+  actionCard: {
+    width: "48%",
+    backgroundColor: "#1E293B",
+    borderRadius: 18,
+    padding: 20,
+    alignItems: "center",
+    marginBottom: 15,
+  },
+
+  actionText: {
+    color: "#fff",
+    marginTop: 10,
+    fontWeight: "600",
+  },
+
+  activityCard: {
+    backgroundColor: "#1E293B",
+    borderRadius: 18,
+    padding: 20,
+    marginBottom: 30,
+  },
+
+  activityText: {
+    color: "#CBD5E1",
+    marginBottom: 12,
   },
 });
