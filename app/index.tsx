@@ -1,56 +1,62 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { router } from "expo-router";
-import { useEffect } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { Redirect } from "expo-router";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, View } from "react-native";
 
-export default function SplashScreen() {
+export default function Index() {
+  const [isLoading, setIsLoading] = useState(true);
+  const [targetRoute, setTargetRoute] = useState<
+    "/(tabs)" | "/login" | "/onboarding"
+  >("/login");
+
   useEffect(() => {
-    // Type the timer as ReturnType<typeof setTimeout> to support both Node and RN environments
-    let timer: ReturnType<typeof setTimeout>;
-
-    const checkLogin = async () => {
+    async function prepareApp() {
       try {
-        const status = await AsyncStorage.getItem("isLoggedIn");
+        // Fetch both keys at the exact same time
+        const values = await AsyncStorage.multiGet([
+          "has_completed_onboarding",
+          "isLoggedIn",
+        ]);
 
-        timer = setTimeout(() => {
-          if (status === "true") {
-            router.replace("/(tabs)");
-          } else {
-            router.replace("/login");
-          }
-        }, 1500);
-      } catch (error) {
-        console.error("Failed to fetch login status:", error);
-        router.replace("/login");
+        const onboardingVal = values[0][1];
+        const isLoggedInVal = values[1][1];
+
+        // 1. If user is logged in -> Go straight to main app
+        if (isLoggedInVal === "true") {
+          setTargetRoute("/(tabs)");
+        }
+        // 2. If user completed onboarding but not logged in -> Go to Login
+        else if (onboardingVal === "true") {
+          setTargetRoute("/login");
+        }
+        // 3. Otherwise -> Show Onboarding
+        else {
+          setTargetRoute("/onboarding");
+        }
+      } catch (e) {
+        console.error("Storage check error:", e);
+      } finally {
+        setIsLoading(false);
       }
-    };
+    }
 
-    checkLogin();
-
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
+    prepareApp();
   }, []);
 
-  return (
-    <View style={styles.container}>
-      <Text style={styles.title}>PG Management</Text>
-      <ActivityIndicator size="large" color="#FFFFFF" />
-    </View>
-  );
-}
+  if (isLoading) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: "#0F172A",
+        }}
+      >
+        <ActivityIndicator size="large" color="#2563EB" />
+      </View>
+    );
+  }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#0F172A",
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: "bold",
-    color: "#FFFFFF",
-    marginBottom: 20,
-  },
-});
+  return <Redirect href={targetRoute} />;
+}
