@@ -17,10 +17,47 @@ import {
   View,
 } from "react-native";
 
+// --- Shared Theme Configuration ---
+export const THEME = {
+  colors: {
+    bgDark: "#0F172A", // Deep Slate
+    cardBg: "#1E293B", // Elevated Surface
+    cardBgSubtle: "#0F172A",
+    primary: "#2563EB", // Admin Blue
+    primaryHover: "#1D4ED8",
+    border: "#334155",
+    textPrimary: "#F8FAFC",
+    textSecondary: "#94A3B8",
+    textMuted: "#64748B",
+    accent: "#38BDF8",
+    successBg: "#10B98115",
+    successBorder: "#10B98140",
+    successText: "#34D399",
+    warningBg: "#F59E0B15",
+    warningBorder: "#F59E0B40",
+    warningText: "#FBBF24",
+    dangerBg: "#EF444415",
+    dangerText: "#F87171",
+  },
+  spacing: {
+    xs: 4,
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 20,
+  },
+  radius: {
+    sm: 6,
+    md: 10,
+    lg: 14,
+    full: 9999,
+  },
+};
+
 export interface Tenant {
   id: string;
-  pgId?: string; // Associated PG / Property ID
-  pgName?: string; // PG Name for display
+  pgId?: string;
+  pgName?: string;
   name: string;
   phone: string;
   room: string;
@@ -33,7 +70,6 @@ export interface Tenant {
   emergencyContact?: string;
 }
 
-// Sample default data with multiple PG names
 const defaultTenants: Tenant[] = [
   {
     id: "1",
@@ -70,10 +106,8 @@ const defaultTenants: Tenant[] = [
 export default function TenantsScreen() {
   const [tenants, setTenants] = useState<Tenant[]>(defaultTenants);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedPg, setSelectedPg] = useState<string>("ALL"); // Selected PG filter
-  const [selectedStatus, setSelectedStatus] = useState<
-    "ALL" | "Active" | "Inactive"
-  >("ALL");
+  const [selectedPg, setSelectedPg] = useState<string>("ALL");
+  const [selectedStatus, setSelectedStatus] = useState<"ALL" | "Active" | "Inactive">("ALL");
 
   const loadTenants = async () => {
     try {
@@ -96,28 +130,18 @@ export default function TenantsScreen() {
   useFocusEffect(
     useCallback(() => {
       loadTenants();
-    }, []),
+    }, [])
   );
 
-  // Extract unique PG names for the top filter tabs
   const availablePgs = useMemo(() => {
-    const pgs = tenants
-      .map((t) => t.pgName)
-      .filter((name): name is string => Boolean(name));
+    const pgs = tenants.map((t) => t.pgName).filter((name): name is string => Boolean(name));
     return Array.from(new Set(pgs));
   }, [tenants]);
 
-  // Enhanced Filtering logic
   const filteredTenants = useMemo(() => {
     return tenants.filter((t) => {
-      // 1. Filter by PG Name
       const matchesPg = selectedPg === "ALL" || t.pgName === selectedPg;
-
-      // 2. Filter by Status
-      const matchesStatus =
-        selectedStatus === "ALL" || t.status === selectedStatus;
-
-      // 3. Multi-field Search Query (Name, Phone, Room, Bed, PG Name)
+      const matchesStatus = selectedStatus === "ALL" || t.status === selectedStatus;
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch =
         q === "" ||
@@ -138,18 +162,16 @@ export default function TenantsScreen() {
       if (supported) {
         await Linking.openURL(url);
       } else {
-        Alert.alert(
-          "Error",
-          "Phone call function is not supported on this device.",
-        );
+        Alert.alert("Error", "Phone call function is not supported on this device.");
       }
-    } catch (err) {
+    } catch {
       Alert.alert("Error", "Unable to open phone dialer.");
     }
   };
 
   const renderTenantItem = ({ item }: { item: Tenant }) => (
     <View style={styles.card}>
+      {/* Top Header Row */}
       <View style={styles.topRow}>
         <View style={styles.avatarContainer}>
           <Text style={styles.avatarText}>{item.name[0]?.toUpperCase()}</Text>
@@ -160,7 +182,7 @@ export default function TenantsScreen() {
           <Text style={styles.phoneSub}>{item.phone}</Text>
           {item.pgName && (
             <View style={styles.pgTagContainer}>
-              <Ionicons name="home-outline" size={12} color="#94A3B8" />
+              <Ionicons name="business" size={12} color={THEME.colors.textSecondary} />
               <Text style={styles.pgTagText}>{item.pgName}</Text>
             </View>
           )}
@@ -168,17 +190,21 @@ export default function TenantsScreen() {
 
         <View
           style={[
-            styles.badge,
+            styles.statusBadge,
             {
-              backgroundColor: item.status === "Active" ? "#14532D" : "#7F1D1D",
+              backgroundColor:
+                item.status === "Active" ? THEME.colors.successBg : THEME.colors.dangerBg,
+              borderColor:
+                item.status === "Active" ? THEME.colors.successBorder : THEME.colors.dangerBg,
             },
           ]}
         >
           <Text
             style={[
-              styles.badgeText,
+              styles.statusBadgeText,
               {
-                color: item.status === "Active" ? "#4ADE80" : "#FCA5A5",
+                color:
+                  item.status === "Active" ? THEME.colors.successText : THEME.colors.dangerText,
               },
             ]}
           >
@@ -189,19 +215,19 @@ export default function TenantsScreen() {
 
       <View style={styles.divider} />
 
-      {/* Room & Bed Info */}
+      {/* Room & Bed Quick Metadata */}
       <View style={styles.infoRow}>
         <View style={styles.infoBox}>
-          <Ionicons name="business-outline" size={16} color="#3B82F6" />
+          <Ionicons name="business-outline" size={15} color={THEME.colors.accent} />
           <Text style={styles.infoText}>Room {item.room}</Text>
         </View>
         <View style={styles.infoBox}>
-          <Ionicons name="bed-outline" size={16} color="#F59E0B" />
+          <Ionicons name="bed-outline" size={15} color={THEME.colors.warningText} />
           <Text style={styles.infoText}>Bed {item.bed}</Text>
         </View>
       </View>
 
-      {/* Verification Status Badges */}
+      {/* Compliance / Document Status Badges */}
       <View style={styles.verificationRow}>
         <View
           style={[
@@ -210,21 +236,17 @@ export default function TenantsScreen() {
           ]}
         >
           <Ionicons
-            name={
-              item.hasAadhaar
-                ? "checkmark-circle-outline"
-                : "alert-circle-outline"
-            }
-            size={14}
-            color={item.hasAadhaar ? "#22C55E" : "#F59E0B"}
+            name={item.hasAadhaar ? "checkmark-circle" : "alert-circle"}
+            size={13}
+            color={item.hasAadhaar ? THEME.colors.successText : THEME.colors.warningText}
           />
           <Text
             style={[
               styles.tagText,
-              { color: item.hasAadhaar ? "#22C55E" : "#F59E0B" },
+              { color: item.hasAadhaar ? THEME.colors.successText : THEME.colors.warningText },
             ]}
           >
-            {item.hasAadhaar ? "Aadhaar Verified" : "Aadhaar Missing"}
+            {item.hasAadhaar ? "ID Verified" : "ID Pending"}
           </Text>
         </View>
 
@@ -235,17 +257,17 @@ export default function TenantsScreen() {
           ]}
         >
           <Ionicons
-            name={item.hasPhoto ? "image-outline" : "alert-circle-outline"}
-            size={14}
-            color={item.hasPhoto ? "#22C55E" : "#F59E0B"}
+            name={item.hasPhoto ? "image" : "alert-circle"}
+            size={13}
+            color={item.hasPhoto ? THEME.colors.successText : THEME.colors.warningText}
           />
           <Text
             style={[
               styles.tagText,
-              { color: item.hasPhoto ? "#22C55E" : "#F59E0B" },
+              { color: item.hasPhoto ? THEME.colors.successText : THEME.colors.warningText },
             ]}
           >
-            {item.hasPhoto ? "Photo Attached" : "No Photo"}
+            {item.hasPhoto ? "Photo Attached" : "Photo Missing"}
           </Text>
         </View>
       </View>
@@ -255,13 +277,15 @@ export default function TenantsScreen() {
         <TouchableOpacity
           style={styles.callButton}
           onPress={() => makePhoneCall(item.phone)}
+          activeOpacity={0.7}
         >
-          <Ionicons name="call-outline" size={18} color="#10B981" />
+          <Ionicons name="call-outline" size={16} color={THEME.colors.successText} />
           <Text style={styles.callButtonText}>Call</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.detailsButton}
+          activeOpacity={0.8}
           onPress={() =>
             router.push({
               pathname: "/tenant-details" as any,
@@ -282,8 +306,8 @@ export default function TenantsScreen() {
             })
           }
         >
-          <Text style={styles.detailsButtonText}>View Details</Text>
-          <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
+          <Text style={styles.detailsButtonText}>View Profile</Text>
+          <Ionicons name="chevron-forward" size={15} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
     </View>
@@ -291,15 +315,18 @@ export default function TenantsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
+      <StatusBar barStyle="light-content" backgroundColor={THEME.colors.bgDark} />
 
-      {/* Header */}
+      {/* Admin Screen Title Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>👥 Tenants</Text>
-        <Text style={styles.totalBadge}>{filteredTenants.length} Total</Text>
+        <View style={styles.headerTitleRow}>
+          <Ionicons name="people" size={22} color={THEME.colors.primary} />
+          <Text style={styles.title}>Tenant Directory</Text>
+        </View>
+        <Text style={styles.totalBadge}>{filteredTenants.length} Records</Text>
       </View>
 
-      {/* Horizontal PG Property Selector Filter */}
+      {/* Property Selector Chips */}
       {availablePgs.length > 0 && (
         <View style={styles.filterSection}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -307,30 +334,17 @@ export default function TenantsScreen() {
               style={[styles.chip, selectedPg === "ALL" && styles.activeChip]}
               onPress={() => setSelectedPg("ALL")}
             >
-              <Text
-                style={[
-                  styles.chipText,
-                  selectedPg === "ALL" && styles.activeChipText,
-                ]}
-              >
-                All PGs
+              <Text style={[styles.chipText, selectedPg === "ALL" && styles.activeChipText]}>
+                All Properties
               </Text>
             </TouchableOpacity>
             {availablePgs.map((pgName) => (
               <TouchableOpacity
                 key={pgName}
-                style={[
-                  styles.chip,
-                  selectedPg === pgName && styles.activeChip,
-                ]}
+                style={[styles.chip, selectedPg === pgName && styles.activeChip]}
                 onPress={() => setSelectedPg(pgName)}
               >
-                <Text
-                  style={[
-                    styles.chipText,
-                    selectedPg === pgName && styles.activeChipText,
-                  ]}
-                >
+                <Text style={[styles.chipText, selectedPg === pgName && styles.activeChipText]}>
                   {pgName}
                 </Text>
               </TouchableOpacity>
@@ -339,32 +353,29 @@ export default function TenantsScreen() {
         </View>
       )}
 
-      {/* Search Bar & Status Filters */}
+      {/* Search Input */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search-outline" size={20} color="#94A3B8" />
+        <Ionicons name="search-outline" size={18} color={THEME.colors.textMuted} />
         <TextInput
-          placeholder="Search name, phone, room, bed..."
-          placeholderTextColor="#94A3B8"
+          placeholder="Search by name, phone, room..."
+          placeholderTextColor={THEME.colors.textMuted}
           style={styles.searchInput}
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={() => setSearchQuery("")}>
-            <Ionicons name="close-circle" size={20} color="#94A3B8" />
+            <Ionicons name="close-circle" size={18} color={THEME.colors.textMuted} />
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Status Filter Toggle Chips */}
+      {/* Status Segment Control */}
       <View style={styles.statusRow}>
         {(["ALL", "Active", "Inactive"] as const).map((status) => (
           <TouchableOpacity
             key={status}
-            style={[
-              styles.statusChip,
-              selectedStatus === status && styles.activeStatusChip,
-            ]}
+            style={[styles.statusChip, selectedStatus === status && styles.activeStatusChip]}
             onPress={() => setSelectedStatus(status)}
           >
             <Text
@@ -388,19 +399,19 @@ export default function TenantsScreen() {
         renderItem={renderTenantItem}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Ionicons name="people-outline" size={48} color="#475569" />
-            <Text style={styles.emptyText}>No tenants found</Text>
+            <Ionicons name="folder-open-outline" size={44} color={THEME.colors.textMuted} />
+            <Text style={styles.emptyText}>No matching tenant records found</Text>
           </View>
         }
       />
 
-      {/* Floating Add Button */}
+      {/* Floating Add Tenant Button */}
       <TouchableOpacity
         style={styles.fab}
-        activeOpacity={0.8}
+        activeOpacity={0.85}
         onPress={() => router.push("/add-tenant")}
       >
-        <Ionicons name="add" size={32} color="#FFFFFF" />
+        <Ionicons name="add" size={28} color="#FFFFFF" />
       </TouchableOpacity>
     </SafeAreaView>
   );
@@ -409,134 +420,143 @@ export default function TenantsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0F172A",
-    paddingHorizontal: 20,
+    backgroundColor: THEME.colors.bgDark,
+    paddingHorizontal: THEME.spacing.lg,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 20,
-    marginBottom: 12,
+    marginTop: THEME.spacing.md,
+    marginBottom: THEME.spacing.md,
+  },
+  headerTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: THEME.spacing.sm,
   },
   title: {
-    color: "#FFFFFF",
-    fontSize: 26,
+    color: THEME.colors.textPrimary,
+    fontSize: 22,
     fontWeight: "700",
+    letterSpacing: 0.3,
   },
   totalBadge: {
-    color: "#94A3B8",
-    fontSize: 14,
-    backgroundColor: "#1E293B",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+    color: THEME.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "600",
+    backgroundColor: THEME.colors.cardBg,
+    paddingHorizontal: THEME.spacing.md,
+    paddingVertical: 5,
+    borderRadius: THEME.radius.full,
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
   },
   filterSection: {
-    marginBottom: 12,
+    marginBottom: THEME.spacing.md,
   },
   chip: {
-    backgroundColor: "#1E293B",
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginRight: 8,
+    backgroundColor: THEME.colors.cardBg,
+    borderRadius: THEME.radius.md,
+    paddingHorizontal: THEME.spacing.md,
+    paddingVertical: THEME.spacing.sm,
+    marginRight: THEME.spacing.sm,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: THEME.colors.border,
   },
   activeChip: {
-    backgroundColor: "#2563EB",
-    borderColor: "#3B82F6",
+    backgroundColor: THEME.colors.primary,
+    borderColor: THEME.colors.primaryHover,
   },
   chipText: {
-    color: "#94A3B8",
+    color: THEME.colors.textSecondary,
     fontSize: 13,
     fontWeight: "600",
   },
   activeChipText: {
-    color: "#FFFFFF",
+    color: THEME.colors.textPrimary,
   },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1E293B",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    height: 48,
-    marginBottom: 10,
+    backgroundColor: THEME.colors.cardBg,
+    borderRadius: THEME.radius.md,
+    paddingHorizontal: THEME.spacing.md,
+    height: 44,
+    marginBottom: THEME.spacing.sm,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: THEME.colors.border,
   },
   searchInput: {
     flex: 1,
-    color: "#FFFFFF",
-    marginLeft: 10,
-    fontSize: 15,
+    color: THEME.colors.textPrimary,
+    marginLeft: THEME.spacing.sm,
+    fontSize: 14,
   },
   statusRow: {
     flexDirection: "row",
-    marginBottom: 16,
-    gap: 8,
+    marginBottom: THEME.spacing.lg,
+    gap: THEME.spacing.sm,
   },
   statusChip: {
     flex: 1,
     alignItems: "center",
-    paddingVertical: 6,
-    backgroundColor: "#1E293B",
-    borderRadius: 10,
+    paddingVertical: 7,
+    backgroundColor: THEME.colors.cardBg,
+    borderRadius: THEME.radius.md,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: THEME.colors.border,
   },
   activeStatusChip: {
-    backgroundColor: "#334155",
-    borderColor: "#64748B",
+    backgroundColor: THEME.colors.border,
+    borderColor: THEME.colors.textMuted,
   },
   statusChipText: {
-    color: "#94A3B8",
+    color: THEME.colors.textSecondary,
     fontSize: 12,
     fontWeight: "600",
   },
   activeStatusChipText: {
-    color: "#F8FAFC",
+    color: THEME.colors.textPrimary,
   },
   card: {
-    backgroundColor: "#1E293B",
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 14,
+    backgroundColor: THEME.colors.cardBg,
+    borderRadius: THEME.radius.lg,
+    padding: THEME.spacing.lg,
+    marginBottom: THEME.spacing.md,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: THEME.colors.border,
   },
   topRow: {
     flexDirection: "row",
     alignItems: "center",
   },
   avatarContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#2563EB",
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: THEME.colors.primary,
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 12,
+    marginRight: THEME.spacing.md,
   },
   avatarText: {
-    color: "#FFFFFF",
+    color: THEME.colors.textPrimary,
     fontWeight: "700",
-    fontSize: 18,
+    fontSize: 16,
   },
   nameContainer: {
     flex: 1,
   },
   name: {
-    color: "#F8FAFC",
-    fontSize: 17,
+    color: THEME.colors.textPrimary,
+    fontSize: 16,
     fontWeight: "600",
   },
   phoneSub: {
-    color: "#94A3B8",
-    fontSize: 13,
-    marginTop: 2,
+    color: THEME.colors.textSecondary,
+    fontSize: 12,
+    marginTop: 1,
   },
   pgTagContainer: {
     flexDirection: "row",
@@ -545,64 +565,65 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   pgTagText: {
-    color: "#38BDF8",
-    fontSize: 12,
+    color: THEME.colors.accent,
+    fontSize: 11,
     fontWeight: "500",
   },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: THEME.radius.sm,
+    borderWidth: 1,
   },
-  badgeText: {
-    fontSize: 12,
+  statusBadgeText: {
+    fontSize: 11,
     fontWeight: "600",
   },
   divider: {
     height: 1,
-    backgroundColor: "#334155",
-    marginVertical: 12,
+    backgroundColor: THEME.colors.border,
+    marginVertical: THEME.spacing.md,
   },
   infoRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 10,
+    marginBottom: THEME.spacing.sm,
   },
   infoBox: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#0F172A",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
+    backgroundColor: THEME.colors.cardBgSubtle,
+    paddingHorizontal: THEME.spacing.md,
+    paddingVertical: THEME.spacing.sm,
+    borderRadius: THEME.radius.sm,
     width: "48%",
   },
   infoText: {
-    color: "#CBD5E1",
-    marginLeft: 8,
-    fontSize: 13,
+    color: THEME.colors.textPrimary,
+    marginLeft: THEME.spacing.sm,
+    fontSize: 12,
     fontWeight: "500",
   },
   verificationRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: THEME.spacing.lg,
   },
   tag: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 8,
+    paddingHorizontal: THEME.spacing.sm,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: THEME.radius.sm,
     borderWidth: 1,
   },
   tagSuccess: {
-    backgroundColor: "#10B98110",
-    borderColor: "#10B98140",
+    backgroundColor: THEME.colors.successBg,
+    borderColor: THEME.colors.successBorder,
   },
   tagWarning: {
-    backgroundColor: "#F59E0B10",
-    borderColor: "#F59E0B40",
+    backgroundColor: THEME.colors.warningBg,
+    borderColor: THEME.colors.warningBorder,
   },
   tagText: {
     fontSize: 11,
@@ -618,35 +639,35 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#10B9811A",
+    backgroundColor: THEME.colors.successBg,
     borderWidth: 1,
-    borderColor: "#10B98150",
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    width: "30%",
+    borderColor: THEME.colors.successBorder,
+    paddingVertical: 9,
+    paddingHorizontal: THEME.spacing.md,
+    borderRadius: THEME.radius.md,
+    width: "28%",
   },
   callButtonText: {
-    color: "#10B981",
+    color: THEME.colors.successText,
     fontWeight: "600",
     marginLeft: 6,
-    fontSize: 13,
+    fontSize: 12,
   },
   detailsButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2563EB",
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    width: "66%",
+    backgroundColor: THEME.colors.primary,
+    paddingVertical: 9,
+    paddingHorizontal: THEME.spacing.md,
+    borderRadius: THEME.radius.md,
+    width: "68%",
   },
   detailsButtonText: {
     color: "#FFFFFF",
     fontWeight: "600",
-    marginRight: 6,
-    fontSize: 13,
+    marginRight: 4,
+    fontSize: 12,
   },
   emptyContainer: {
     alignItems: "center",
@@ -654,24 +675,24 @@ const styles = StyleSheet.create({
     marginTop: 60,
   },
   emptyText: {
-    color: "#64748B",
-    marginTop: 10,
-    fontSize: 16,
+    color: THEME.colors.textMuted,
+    marginTop: THEME.spacing.sm,
+    fontSize: 14,
   },
   fab: {
     position: "absolute",
-    right: 20,
+    right: THEME.spacing.lg,
     bottom: 25,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#2563EB",
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: THEME.colors.primary,
     justifyContent: "center",
     alignItems: "center",
-    elevation: 5,
+    elevation: 4,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
     shadowRadius: 4,
   },
 });

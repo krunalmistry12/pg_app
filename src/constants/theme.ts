@@ -1,28 +1,39 @@
 // src/constants/theme.ts
 
 export const COLORS = {
-  // Brand Colors
-  primary: "#2563EB",
-  primaryHover: "#1D4ED8",
-  accent: "#38BDF8",
-  accentBackground: "rgba(56, 189, 248, 0.1)",
+  // Brand & Primary Colors
+  primary: "#3B82F6",       // Vibrant Blue
+  primaryHover: "#2563EB",  // Deepened Blue for interaction
+  accent: "#38BDF8",        // Sky Blue Accent
+  accentBackground: "rgba(56, 189, 248, 0.12)", // Harmonized with accent
+  whatsapp: "#25D366",      // WhatsApp Green
 
-  // Status Colors
-  success: "#10B981",
-  warning: "#D97706",
-  danger: "#EF4444",
-  dangerText: "#F87171",
+  // Status & Feedback Colors
+  success: "#10B981",       // Emerald Green
+  successBackground: "rgba(16, 185, 129, 0.12)",
+  warning: "#F59E0B",       // Amber Warning
+  warningBackground: "rgba(245, 158, 11, 0.12)",
+  danger: "#EF4444",        // Rose Red Error/Delete
+  dangerText: "#F87171",    // Softer Red for text contrast
+  dangerBackground: "rgba(239, 68, 68, 0.12)",
 
-  // Dark Theme Backgrounds
-  background: "#0F172A", // Deep Navy Dark
-  surface: "#1E293B",    // Dark Slate Card/Input background
-  border: "#334155",     // Muted borders
+  // Dark Theme Backgrounds & Surfaces (Polished Depth Hierarchy)
+  background: "#0F172A",    // Deep Slate Base
+  bgDark: "#0B0F19",        // Deepest Backdrop (Modals/Overlays)
+  surface: "#1E293B",       // Cards & Inputs Background
+  cardBg: "#131B2E",        // Alternate Elevated Cards
+  border: "#26334D",        // Refined visible boundary stroke
 
-  // Typography
-  textPrimary: "#F8FAFC",
-  textSecondary: "#94A3B8",
-  textMuted: "#64748B",
-  textWhite: "#FFFFFF",
+  // Typography Palette
+  textPrimary: "#F8FAFC",   // High Contrast White-Blue
+  textSecondary: "#94A3B8", // Readable Subtitle Text
+  textMuted: "#64748B",     // Disabled/Placeholder Text
+  textWhite: "#FFFFFF",     // Absolute White
+
+  
+  successText: "#4ADE80",
+  
+  warningText: "#FBBF24",
 };
 
 export const SPACING = {
@@ -64,4 +75,11 @@ export const TYPOGRAPHY = {
     fontSize: 14,
     color: COLORS.textPrimary,
   },
+};
+
+export const THEME = {
+  colors: COLORS,
+  spacing: SPACING,
+  radius: RADIUS,
+  typography: TYPOGRAPHY,
 };

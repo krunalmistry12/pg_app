@@ -1,71 +1,242 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, useLocalSearchParams } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import {
   Alert,
+  Image,
   Linking,
+  Modal,
   SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { COLORS, RADIUS, SPACING, TYPOGRAPHY, THEME } from "../src/constants/theme";
 
 export default function TenantDetailsScreen() {
   const params = useLocalSearchParams();
 
-  // Route parameters with fallbacks
-  const {
-    id,
-    name = "Tenant Name",
-    phone = "N/A",
-    room = "N/A",
-    bed = "N/A",
-    status = "Active",
-    deposit = "0",
-    dueDate = "N/A",
-    hasAadhaar = "false",
-    hasPhoto = "false",
-    emergencyContact = "",
-  } = params;
+  // Full-Screen Media Viewer State
+  const [viewerState, setViewerState] = useState<{
+    visible: boolean;
+    title: string;
+    uri: string | null;
+  }>({
+    visible: false,
+    title: "",
+    uri: null,
+  });
 
-  const isAadhaarVerified = String(hasAadhaar).toLowerCase() === "true";
-  const isPhotoAttached = String(hasPhoto).toLowerCase() === "true";
-  const isActive = String(status ?? "").toLowerCase() === "active";
+  // Try parsing JSON object if passed as params.tenant or params.item
+  const parsedTenantObject = React.useMemo(() => {
+    const rawObj = params.tenant || params.item || params.data;
+    if (typeof rawObj === "string") {
+      try {
+        return JSON.parse(rawObj);
+      } catch {
+        return {};
+      }
+    } else if (typeof rawObj === "object" && rawObj !== null) {
+      return rawObj;
+    }
+    return {};
+  }, [params]);
+
+  // Parameter Extractor
+  const getParam = (keyAliases: string[], fallback: string = "N/A"): string => {
+    for (const key of keyAliases) {
+      const val = parsedTenantObject[key];
+      if (val !== undefined && val !== null && String(val).trim() !== "") {
+        return String(val).trim();
+      }
+    }
+    for (const key of keyAliases) {
+      const val = params[key];
+      if (val !== undefined && val !== null) {
+        const strVal = Array.isArray(val) ? val[0] : String(val);
+        if (strVal.trim() !== "" && strVal !== "undefined" && strVal !== "null") {
+          return strVal.trim();
+        }
+      }
+    }
+    return fallback;
+  };
+
+  // Safe Parameter Extraction
+  const id = getParam(["id", "_id"]);
+  const name = getParam(["name", "tenantName", "fullName"], "Tenant Name");
+  const phone = getParam(["phone", "phoneNumber", "mobile", "contact"], "");
+
+  // Emergency Contact Details
+  const emergencyPhone = getParam(
+    ["emergencyPhone", "emergencyContact", "emergencyNumber", "emergency_phone", "guardianPhone"],
+    ""
+  );
+  const emergencyRelation = getParam(
+    ["emergencyRelation", "emergencyName", "relation", "guardianName"],
+    "Emergency Contact"
+  );
+
+  const room = getParam(["room", "roomNo", "roomNumber"], "N/A");
+  const bed = getParam(["bed", "bedNo", "bedNumber"], "N/A");
+  const status = getParam(["status"], "Active");
+  const rent = getParam(["rent", "monthlyRent", "monthly_rent", "rentAmount", "amount"], "0");
+  const deposit = getParam(["deposit", "securityDeposit", "security_deposit", "depositAmount"], "0");
+  const joiningDate = getParam(["joiningDate", "dateOfJoining", "joining_date", "startDate", "joining"], "N/A");
+  const hasAadhaar = getParam(["hasAadhaar", "aadhaarVerified"], "false");
+  const hasPhoto = getParam(["hasPhoto"], "false");
+
+  // Expanded Image & Document URI Key Mapping
+  const photoUri = getParam(["photoUri", "photo", "image", "avatar", "profilePic"], "");
+  const documentUri = getParam(
+    ["documentUri", "aadhaarImage", "document", "idProofUri", "proofUri", "idProof", "idProofImage", "fileUri"],
+    ""
+  );
+
+  const [currentStatus, setCurrentStatus] = useState<string>(status);
+  const isActive = currentStatus.toLowerCase() === "active";
+
+  const validPhotoUri =
+    photoUri && photoUri !== "undefined" && photoUri !== "null" && String(photoUri).trim() !== ""
+      ? String(photoUri).trim()
+      : null;
+
+  const validDocumentUri =
+    documentUri && documentUri !== "undefined" && documentUri !== "null" && String(documentUri).trim() !== ""
+      ? String(documentUri).trim()
+      : null;
+
+  const isPhotoAvailable = validPhotoUri !== null || String(hasPhoto).toLowerCase() === "true";
+  const isAadhaarVerified = String(hasAadhaar).toLowerCase() === "true" || validDocumentUri !== null;
 
   const initials = String(name)
     .trim()
     .split(" ")
-    .map((word) => word[0])
+    .map((w) => w[0])
     .join("")
     .substring(0, 2)
     .toUpperCase();
 
+  // Helper to open media viewer modal or external document links safely
+  const openViewer = async (title: string, uri: string | null) => {
+    if (!uri) {
+      Alert.alert("Notice", "No attachment available to view.");
+      return;
+    }
+
+    const isPdf = uri.toLowerCase().includes(".pdf") || uri.toLowerCase().includes("application/pdf");
+
+    if (isPdf) {
+      try {
+        const supported = await Linking.canOpenURL(uri);
+        if (supported) {
+          await Linking.openURL(uri);
+        } else {
+          Alert.alert("Error", "Cannot open this document format.");
+        }
+      } catch {
+        Alert.alert("Error", "Failed to open document file.");
+      }
+    } else {
+      setViewerState({ visible: true, title, uri });
+    }
+  };
+
+  // Call Launcher
   const handlePhoneCall = async (phoneNumber: string) => {
-    if (!phoneNumber || phoneNumber === "N/A") return;
+    if (!phoneNumber || phoneNumber === "N/A") {
+      Alert.alert("Notice", "No valid phone number available.");
+      return;
+    }
     const url = `tel:${phoneNumber}`;
     try {
       const supported = await Linking.canOpenURL(url);
-      if (supported) {
-        await Linking.openURL(url);
-      } else {
-        Alert.alert(
-          "Error",
-          "Phone call function is not supported on this device.",
-        );
-      }
+      if (supported) await Linking.openURL(url);
+      else Alert.alert("Error", "Phone call dialer is not supported.");
     } catch {
       Alert.alert("Error", "Unable to open phone dialer.");
     }
   };
 
+  // Direct WhatsApp Launcher (No default text)
+  const openWhatsApp = async (phoneNumber: string) => {
+    if (!phoneNumber || phoneNumber === "N/A") {
+      Alert.alert("Notice", "No valid phone number available.");
+      return;
+    }
+
+    let cleanNumber = phoneNumber.replace(/[^0-9]/g, "");
+    if (cleanNumber.length === 10) cleanNumber = `91${cleanNumber}`;
+
+    const appUrl = `whatsapp://send?phone=${cleanNumber}`;
+    const webUrl = `https://wa.me/${cleanNumber}`;
+
+    try {
+      const supported = await Linking.canOpenURL(appUrl);
+      if (supported) await Linking.openURL(appUrl);
+      else await Linking.openURL(webUrl);
+    } catch {
+      Alert.alert("Error", "Could not open WhatsApp.");
+    }
+  };
+
+  // SMS Launcher
+  const handleSMS = async (phoneNumber: string) => {
+    if (!phoneNumber || phoneNumber === "N/A") {
+      Alert.alert("Notice", "No valid phone number available.");
+      return;
+    }
+    const url = `sms:${phoneNumber}`;
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Error", "Unable to open SMS app.");
+    }
+  };
+
+  // Toggle Status
+  const handleToggleStatus = () => {
+    const nextStatus = isActive ? "Inactive" : "Active";
+    const title = isActive ? "Deactivate Tenant" : "Re-activate Tenant";
+    const message = isActive
+      ? `Are you sure you want to mark ${name} as inactive? Room ${room} will be marked available.`
+      : `Re-activate ${name} as an active resident?`;
+
+    Alert.alert(title, message, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: isActive ? "Deactivate" : "Activate",
+        style: isActive ? "destructive" : "default",
+        onPress: async () => {
+          try {
+            const data = await AsyncStorage.getItem("tenants");
+            if (data) {
+              const tenants = JSON.parse(data);
+              const updated = tenants.map((t: any) =>
+                String(t.id) === String(id) ? { ...t, status: nextStatus } : t
+              );
+              await AsyncStorage.setItem("tenants", JSON.stringify(updated));
+            }
+            setCurrentStatus(nextStatus);
+            Alert.alert("Status Updated", `Tenant is now ${nextStatus}.`);
+          } catch {
+            Alert.alert("Error", "Failed to update tenant status.");
+          }
+        },
+      },
+    ]);
+  };
+
+  // Delete Record
   const handleDelete = () => {
     Alert.alert(
-      "Delete Tenant",
-      `Are you sure you want to remove ${name} from records?`,
+      "Delete Permanently",
+      `Are you sure you want to delete ${name}'s record permanently?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -76,253 +247,379 @@ export default function TenantDetailsScreen() {
               const data = await AsyncStorage.getItem("tenants");
               const tenants = data ? JSON.parse(data) : [];
               const updated = tenants.filter(
-                (t: { id: string }) => t.id !== id,
+                (t: { id: string }) => String(t.id) !== String(id)
               );
-
               await AsyncStorage.setItem("tenants", JSON.stringify(updated));
-
-              Alert.alert("Success", "Tenant record deleted successfully.");
+              Alert.alert("Deleted", "Tenant record deleted successfully.");
               router.back();
-            } catch (error) {
-              console.error("Delete Error:", error);
-              Alert.alert(
-                "Error",
-                "Failed to delete tenant. Please try again.",
-              );
+            } catch {
+              Alert.alert("Error", "Failed to delete record.");
             }
           },
         },
-      ],
+      ]
     );
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
+      <StatusBar barStyle="light-content" backgroundColor={THEME.colors.bgDark} />
 
-      {/* Navigation Header */}
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.iconBtn}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
+        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <Ionicons name="chevron-back" size={20} color={THEME.colors.textPrimary} />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>Tenant Profile</Text>
+        <Text style={styles.headerTitle}>Tenant Details</Text>
 
         <TouchableOpacity
           style={styles.iconBtn}
-          onPress={handleDelete}
+          onPress={() =>
+            router.push({
+              pathname: "/add-tenant" as any,
+              params: { ...params, isEditing: "true" },
+            })
+          }
           activeOpacity={0.7}
         >
-          <Ionicons name="trash-outline" size={20} color="#EF4444" />
+          <Ionicons name="create-outline" size={18} color={THEME.colors.accent} />
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {/* Profile Card Header */}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        {/* Profile Card */}
         <View style={styles.profileCard}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials || "T"}</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.avatarContainer}
+            onPress={() => openViewer(`${name}'s Photo`, validPhotoUri)}
+            activeOpacity={0.8}
+          >
+            {validPhotoUri ? (
+              <Image source={{ uri: validPhotoUri }} style={styles.avatarImage} />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarText}>{initials || "T"}</Text>
+              </View>
+            )}
+            <View
+              style={[
+                styles.avatarStatusBadge,
+                { backgroundColor: isActive ? THEME.colors.success : THEME.colors.danger },
+              ]}
+            />
+          </TouchableOpacity>
 
           <Text style={styles.name}>{name}</Text>
           <Text style={styles.subtitle}>
             Room {room} • Bed {bed}
           </Text>
 
-          <View
-            style={[
-              styles.statusBadge,
-              { backgroundColor: isActive ? "#14532D" : "#7F1D1D" },
-            ]}
-          >
-            <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: isActive ? "#22C55E" : "#EF4444" },
-              ]}
+          <View style={styles.toggleRow}>
+            <View style={styles.statusIndicator}>
+              <View
+                style={[
+                  styles.statusDot,
+                  { backgroundColor: isActive ? THEME.colors.success : THEME.colors.danger },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.statusText,
+                  { color: isActive ? THEME.colors.success : THEME.colors.danger },
+                ]}
+              >
+                {isActive ? "Active Resident" : "Inactive / Checked Out"}
+              </Text>
+            </View>
+
+            <Switch
+              trackColor={{ false: "#1E293B", true: "#10B98140" }}
+              thumbColor={isActive ? THEME.colors.success : "#94A3B8"}
+              ios_backgroundColor="#1E293B"
+              onValueChange={handleToggleStatus}
+              value={isActive}
             />
-            <Text
-              style={[
-                styles.statusText,
-                { color: isActive ? "#4ADE80" : "#FCA5A5" },
-              ]}
-            >
-              {isActive ? "Active Tenant" : "Inactive Tenant"}
+          </View>
+        </View>
+
+        {/* Payment Reminder Card */}
+        <TouchableOpacity
+          style={styles.reminderCardBtn}
+          onPress={() => {
+            const message = `Hi ${name}, this is a gentle reminder that your monthly rent of ₹${rent} for Room ${room} is due. Please clear the dues at your earliest convenience. Thank you!`;
+            let cleanNumber = phone.replace(/[^0-9]/g, "");
+            if (cleanNumber.length === 10) cleanNumber = `91${cleanNumber}`;
+            
+            const appUrl = `whatsapp://send?phone=${cleanNumber}&text=${encodeURIComponent(message)}`;
+            const webUrl = `https://wa.me/${cleanNumber}?text=${encodeURIComponent(message)}`;
+
+            Linking.canOpenURL(appUrl)
+              .then((supported) => {
+                if (supported) {
+                  return Linking.openURL(appUrl);
+                } else {
+                  return Linking.openURL(webUrl);
+                }
+              })
+              .catch(() => Alert.alert("Error", "Could not open WhatsApp reminder."));
+          }}
+          activeOpacity={0.8}
+        >
+          <View style={styles.reminderIconWrapper}>
+            <Ionicons name="notifications-outline" size={20} color={THEME.colors.warning} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.reminderTitle}>Send Payment Reminder</Text>
+            <Text style={styles.reminderSubtitle}>
+              WhatsApp notice for ₹{rent} due rent
             </Text>
           </View>
-        </View>
+          <Ionicons name="logo-whatsapp" size={22} color={THEME.colors.whatsapp} />
+        </TouchableOpacity>
 
-        {/* Verification Status */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Identity Verification</Text>
-
-          <View style={styles.verificationGrid}>
-            <View
-              style={[
-                styles.tag,
-                isAadhaarVerified ? styles.tagSuccess : styles.tagWarning,
-              ]}
-            >
-              <Ionicons
-                name={
-                  isAadhaarVerified
-                    ? "checkmark-circle-outline"
-                    : "alert-circle-outline"
-                }
-                size={16}
-                color={isAadhaarVerified ? "#22C55E" : "#F59E0B"}
-              />
-              <Text
-                style={[
-                  styles.tagText,
-                  { color: isAadhaarVerified ? "#22C55E" : "#F59E0B" },
-                ]}
-              >
-                {isAadhaarVerified ? "Aadhaar Verified" : "Aadhaar Missing"}
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.tag,
-                isPhotoAttached ? styles.tagSuccess : styles.tagWarning,
-              ]}
-            >
-              <Ionicons
-                name={
-                  isPhotoAttached ? "image-outline" : "alert-circle-outline"
-                }
-                size={16}
-                color={isPhotoAttached ? "#22C55E" : "#F59E0B"}
-              />
-              <Text
-                style={[
-                  styles.tagText,
-                  { color: isPhotoAttached ? "#22C55E" : "#F59E0B" },
-                ]}
-              >
-                {isPhotoAttached ? "Photo On File" : "No Photo"}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Room & Payment Details */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Occupancy & Financials</Text>
-
-          <View style={styles.infoRow}>
-            <View style={styles.iconWrapper}>
-              <Ionicons name="business-outline" size={18} color="#3B82F6" />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Assigned Unit</Text>
-              <Text style={styles.infoValue}>
-                Room {room} • Bed {bed}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.infoRow}>
-            <View style={styles.iconWrapper}>
-              <Ionicons name="cash-outline" size={18} color="#10B981" />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Security Deposit</Text>
-              <Text style={styles.infoValue}>₹{deposit || "0"}</Text>
-            </View>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.infoRow}>
-            <View style={styles.iconWrapper}>
-              <Ionicons name="calendar-outline" size={18} color="#F59E0B" />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Rent Cycle</Text>
-              <Text style={styles.infoValue}>
-                {dueDate ? dueDate : "Due monthly"}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Contact Information */}
+        {/* Primary Contact Details */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Contact Details</Text>
 
-          <TouchableOpacity
-            style={styles.infoRow}
-            onPress={() => handlePhoneCall(String(phone))}
-            activeOpacity={0.7}
-          >
-            <View style={styles.iconWrapper}>
-              <Ionicons name="call-outline" size={18} color="#10B981" />
+          <View style={styles.contactRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.infoLabel}>Primary Phone Number</Text>
+              <Text style={styles.infoValue}>{phone || "N/A"}</Text>
             </View>
-            <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Primary Phone</Text>
-              <Text style={styles.infoValueActive}>{phone}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color="#64748B" />
-          </TouchableOpacity>
 
-          {emergencyContact ? (
-            <>
-              <View style={styles.divider} />
+            <View style={styles.contactActions}>
               <TouchableOpacity
-                style={styles.infoRow}
-                onPress={() => handlePhoneCall(String(emergencyContact))}
+                style={styles.actionBtnCircle}
+                onPress={() => handlePhoneCall(phone)}
                 activeOpacity={0.7}
               >
-                <View style={styles.iconWrapper}>
-                  <Ionicons name="warning-outline" size={18} color="#EF4444" />
-                </View>
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Emergency Contact</Text>
-                  <Text style={styles.infoValueActive}>{emergencyContact}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#64748B" />
+                <Ionicons name="call-outline" size={16} color={THEME.colors.accent} />
               </TouchableOpacity>
-            </>
-          ) : null}
+
+              <TouchableOpacity
+                style={[styles.actionBtnCircle, { backgroundColor: "#25D36615", borderColor: "#25D36640" }]}
+                onPress={() => openWhatsApp(phone)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="logo-whatsapp" size={16} color={THEME.colors.whatsapp} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionBtnCircle}
+                onPress={() => handleSMS(phone)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="chatbox-ellipses-outline" size={16} color={THEME.colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        {/* Emergency Contact Card */}
+        <View style={[styles.card, styles.emergencyCard]}>
+          <View style={styles.emergencyHeaderRow}>
+            <Ionicons name="warning-outline" size={15} color={THEME.colors.danger} />
+            <Text style={styles.emergencyCardTitle}>Emergency Contact</Text>
+          </View>
+
+          <View style={styles.contactRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.infoLabel}>{emergencyRelation}</Text>
+              <Text style={[styles.infoValue, { color: emergencyPhone ? THEME.colors.textPrimary : THEME.colors.textMuted }]}>
+                {emergencyPhone || "Not Provided"}
+              </Text>
+            </View>
+
+            {emergencyPhone ? (
+              <View style={styles.contactActions}>
+                <TouchableOpacity
+                  style={[styles.actionBtnCircle, { borderColor: THEME.colors.danger + "40", backgroundColor: THEME.colors.danger + "15" }]}
+                  onPress={() => handlePhoneCall(emergencyPhone)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="call" size={16} color={THEME.colors.danger} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionBtnCircle, { backgroundColor: "#25D36615", borderColor: "#25D36640" }]}
+                  onPress={() => openWhatsApp(emergencyPhone)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="logo-whatsapp" size={16} color={THEME.colors.whatsapp} />
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Verification & Media Attachments */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Verification & Attachments</Text>
+
+          <View style={styles.verificationGrid}>
+            <View style={[styles.tag, isAadhaarVerified ? styles.tagSuccess : styles.tagWarning]}>
+              <Ionicons
+                name={isAadhaarVerified ? "checkmark-circle" : "alert-circle"}
+                size={15}
+                color={isAadhaarVerified ? THEME.colors.success : THEME.colors.warning}
+              />
+              <Text
+                style={[
+                  styles.tagText,
+                  { color: isAadhaarVerified ? THEME.colors.success : THEME.colors.warning },
+                ]}
+              >
+                {isAadhaarVerified ? "ID Verified" : "ID Missing"}
+              </Text>
+            </View>
+
+            <View style={[styles.tag, isPhotoAvailable ? styles.tagSuccess : styles.tagWarning]}>
+              <Ionicons
+                name={isPhotoAvailable ? "image" : "alert-circle"}
+                size={15}
+                color={isPhotoAvailable ? THEME.colors.success : THEME.colors.warning}
+              />
+              <Text
+                style={[
+                  styles.tagText,
+                  { color: isPhotoAvailable ? THEME.colors.success : THEME.colors.warning },
+                ]}
+              >
+                {isPhotoAvailable ? "Photo Attached" : "Photo Missing"}
+              </Text>
+            </View>
+          </View>
+
+          {/* Action Row for Viewing Attached Media */}
+          <View style={styles.mediaActionsContainer}>
+            {validPhotoUri ? (
+              <TouchableOpacity
+                style={styles.viewMediaBtn}
+                onPress={() => openViewer(`${name}'s Photo`, validPhotoUri)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="person-outline" size={16} color={THEME.colors.accent} />
+                <Text style={styles.viewMediaBtnText}>View Photo</Text>
+                <Ionicons name="eye-outline" size={15} color={THEME.colors.accent} />
+              </TouchableOpacity>
+            ) : null}
+
+            {validDocumentUri ? (
+              <TouchableOpacity
+                style={[styles.viewMediaBtn, { backgroundColor: "#10B98110", borderColor: "#10B98130" }]}
+                onPress={() => openViewer(`${name}'s ID Proof`, validDocumentUri)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="document-text-outline" size={16} color={THEME.colors.success} />
+                <Text style={[styles.viewMediaBtnText, { color: THEME.colors.success }]}>View ID Proof</Text>
+                <Ionicons name="eye-outline" size={15} color={THEME.colors.success} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {!validPhotoUri && !validDocumentUri && (
+            <Text style={styles.noDocText}>No photos or ID proof documents attached.</Text>
+          )}
+        </View>
+
+        {/* Occupancy & Financial Details */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Occupancy & Financials</Text>
+
+          {/* Joining Date */}
+          <View style={styles.infoRow}>
+            <View style={[styles.iconWrapper, { backgroundColor: "#38BDF815" }]}>
+              <Ionicons name="calendar-outline" size={16} color={THEME.colors.accent} />
+            </View>
+            <View style={styles.infoContent}>
+              <Text style={styles.infoLabel}>Joining Date</Text>
+              <Text style={[styles.infoValue, { color: THEME.colors.accent, fontWeight: "600" }]}>
+                {joiningDate}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* Monthly Rent */}
+          <View style={styles.infoRow}>
+            <View style={[styles.iconWrapper, { backgroundColor: "#10B98115" }]}>
+              <Ionicons name="cash-outline" size={16} color={THEME.colors.success} />
+            </View>
+            <View style={styles.infoContent}>
+              <Text style={styles.infoLabel}>Monthly Rent</Text>
+              <Text style={styles.infoValue}>₹{rent} / month</Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* Security Deposit */}
+          <View style={styles.infoRow}>
+            <View style={[styles.iconWrapper, { backgroundColor: "#F59E0B15" }]}>
+              <Ionicons name="shield-checkmark-outline" size={16} color={THEME.colors.warning} />
+            </View>
+            <View style={styles.infoContent}>
+              <Text style={styles.infoLabel}>Security Deposit</Text>
+              <Text style={styles.infoValue}>₹{deposit}</Text>
+            </View>
+          </View>
         </View>
 
         {/* Action Buttons */}
-        <View style={styles.actionContainer}>
+        <View style={styles.adminActionSection}>
           <TouchableOpacity
-            style={styles.editButton}
-            onPress={() =>
-              router.push({
-                pathname: "/add-tenant" as any,
-                params: { ...params, isEditing: "true" },
-              })
-            }
+            style={[
+              styles.deactivateBtn,
+              { backgroundColor: isActive ? "#EF444410" : "#10B98110" },
+              { borderColor: isActive ? "#EF444430" : "#10B98130" },
+            ]}
+            onPress={handleToggleStatus}
             activeOpacity={0.8}
           >
-            <Ionicons name="create-outline" size={18} color="#FFFFFF" />
-            <Text style={styles.editBtnText}>Edit Details</Text>
+            <Ionicons
+              name={isActive ? "person-remove-outline" : "person-add-outline"}
+              size={18}
+              color={isActive ? THEME.colors.danger : THEME.colors.success}
+            />
+            <Text
+              style={[
+                styles.deactivateBtnText,
+                { color: isActive ? THEME.colors.danger : THEME.colors.success },
+              ]}
+            >
+              {isActive ? "Deactivate / Checkout Tenant" : "Re-activate Tenant Account"}
+            </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={handleDelete}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="trash-outline" size={18} color="#EF4444" />
-            <Text style={styles.deleteBtnText}>Remove</Text>
+          <TouchableOpacity style={styles.deleteButton} onPress={handleDelete} activeOpacity={0.8}>
+            <Ionicons name="trash-outline" size={16} color={THEME.colors.danger} />
+            <Text style={styles.deleteBtnText}>Delete Record</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Universal Fullscreen Image & ID Proof Viewer Modal */}
+      <Modal visible={viewerState.visible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>{viewerState.title}</Text>
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={() => setViewerState({ visible: false, title: "", uri: null })}
+            >
+              <Ionicons name="close" size={22} color={THEME.colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.modalImageContainer}>
+            {viewerState.uri ? (
+              <Image source={{ uri: viewerState.uri }} style={styles.modalImage} resizeMode="contain" />
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -330,29 +627,29 @@ export default function TenantDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0F172A",
+    backgroundColor: THEME.colors.bgDark,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingTop: 14,
+    paddingBottom: 10,
   },
   iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: "#1E293B",
+    width: 38,
+    height: 38,
+    borderRadius: THEME.radius.sm,
+    backgroundColor: THEME.colors.cardBg,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: THEME.colors.border,
     justifyContent: "center",
     alignItems: "center",
   },
   headerTitle: {
-    color: "#FFFFFF",
-    fontSize: 18,
+    color: THEME.colors.textPrimary,
+    fontSize: 17,
     fontWeight: "700",
   },
   scrollContent: {
@@ -360,50 +657,101 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   profileCard: {
-    backgroundColor: "#1E293B",
-    borderRadius: 20,
-    padding: 20,
+    backgroundColor: THEME.colors.cardBg,
+    borderRadius: THEME.radius.xl,
+    padding: 22,
     alignItems: "center",
-    marginTop: 10,
+    marginTop: 8,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: THEME.colors.border,
   },
-  avatar: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: "#2563EB",
+  avatarContainer: {
+    position: "relative",
+    marginBottom: 10,
+  },
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    marginTop: 18,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: THEME.colors.border,
+  },
+  reminderCardBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: THEME.colors.cardBg,
+    borderRadius: THEME.radius.lg,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#F59E0B30",
+  },
+  reminderIconWrapper: {
+    width: 38,
+    height: 38,
+    borderRadius: THEME.radius.sm,
+    backgroundColor: "#F59E0B15",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#2563EB",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    marginRight: 12,
+  },
+  reminderTitle: {
+    color: THEME.colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  reminderSubtitle: {
+    color: THEME.colors.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  statusIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  avatarImage: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    borderWidth: 2,
+    borderColor: THEME.colors.primary,
+  },
+  avatarFallback: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    backgroundColor: THEME.colors.primary,
+    justifyContent: "center",
+    alignItems: "center",
   },
   avatarText: {
     color: "#FFFFFF",
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: "700",
+  },
+  avatarStatusBadge: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    borderWidth: 2,
+    borderColor: THEME.colors.cardBg,
   },
   name: {
-    color: "#F8FAFC",
-    fontSize: 22,
+    color: THEME.colors.textPrimary,
+    fontSize: 20,
     fontWeight: "700",
-    marginTop: 12,
-  },
-  subtitle: {
-    color: "#94A3B8",
-    fontSize: 14,
     marginTop: 4,
   },
-  statusBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginTop: 14,
+  subtitle: {
+    color: THEME.colors.textSecondary,
+    fontSize: 13,
+    marginTop: 2,
   },
   statusDot: {
     width: 6,
@@ -416,20 +764,56 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   card: {
-    backgroundColor: "#1E293B",
-    borderRadius: 18,
+    backgroundColor: THEME.colors.cardBg,
+    borderRadius: THEME.radius.lg,
     padding: 16,
-    marginTop: 16,
+    marginTop: 12,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: THEME.colors.border,
   },
-  cardTitle: {
-    color: "#94A3B8",
-    fontSize: 12,
+  emergencyCard: {
+    borderColor: "#EF444430",
+    backgroundColor: "#EF444405",
+  },
+  emergencyHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 10,
+  },
+  emergencyCardTitle: {
+    color: THEME.colors.danger,
+    fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    marginBottom: 14,
+  },
+  cardTitle: {
+    color: THEME.colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  contactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  contactActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  actionBtnCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: THEME.colors.bgDark,
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
+    justifyContent: "center",
+    alignItems: "center",
   },
   verificationGrid: {
     flexDirection: "row",
@@ -441,33 +825,59 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 10,
+    paddingVertical: 10,
+    borderRadius: THEME.radius.sm,
     borderWidth: 1,
   },
   tagSuccess: {
     backgroundColor: "#10B98110",
-    borderColor: "#10B98140",
+    borderColor: "#10B98130",
   },
   tagWarning: {
     backgroundColor: "#F59E0B10",
-    borderColor: "#F59E0B40",
+    borderColor: "#F59E0B30",
   },
   tagText: {
     fontSize: 12,
     fontWeight: "600",
     marginLeft: 6,
   },
+  mediaActionsContainer: {
+    gap: 8,
+    marginTop: 10,
+  },
+  viewMediaBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#38BDF810",
+    borderWidth: 1,
+    borderColor: "#38BDF830",
+    borderRadius: THEME.radius.sm,
+    padding: 12,
+  },
+  viewMediaBtnText: {
+    color: THEME.colors.accent,
+    fontWeight: "600",
+    fontSize: 13,
+    flex: 1,
+    marginLeft: 8,
+  },
+  noDocText: {
+    color: THEME.colors.textMuted,
+    fontSize: 12,
+    fontStyle: "italic",
+    marginTop: 8,
+  },
   infoRow: {
     flexDirection: "row",
     alignItems: "center",
   },
   iconWrapper: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#0F172A",
+    width: 34,
+    height: 34,
+    borderRadius: THEME.radius.sm,
+    backgroundColor: THEME.colors.bgDark,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
@@ -476,62 +886,89 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   infoLabel: {
-    color: "#64748B",
-    fontSize: 12,
+    color: THEME.colors.textMuted,
+    fontSize: 11,
     fontWeight: "500",
   },
   infoValue: {
-    color: "#F8FAFC",
-    fontSize: 15,
-    fontWeight: "600",
-    marginTop: 2,
-  },
-  infoValueActive: {
-    color: "#38BDF8",
-    fontSize: 15,
+    color: THEME.colors.textPrimary,
+    fontSize: 14,
     fontWeight: "600",
     marginTop: 2,
   },
   divider: {
     height: 1,
-    backgroundColor: "#334155",
-    marginVertical: 12,
+    backgroundColor: THEME.colors.border,
+    marginVertical: 10,
   },
-  actionContainer: {
-    flexDirection: "row",
-    marginTop: 24,
-    gap: 12,
+  adminActionSection: {
+    marginTop: 20,
+    gap: 10,
   },
-  editButton: {
-    flex: 2,
-    height: 50,
-    borderRadius: 14,
-    backgroundColor: "#2563EB",
+  deactivateBtn: {
+    width: "100%",
+    height: 46,
+    borderRadius: THEME.radius.md,
+    borderWidth: 1,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
+    gap: 8,
   },
-  editBtnText: {
-    color: "#FFFFFF",
-    fontWeight: "600",
-    fontSize: 15,
-    marginLeft: 8,
+  deactivateBtnText: {
+    fontWeight: "700",
+    fontSize: 13,
   },
   deleteButton: {
-    flex: 1,
-    height: 50,
-    borderRadius: 14,
-    backgroundColor: "#EF444415",
+    width: "100%",
+    height: 46,
+    borderRadius: THEME.radius.md,
+    backgroundColor: "#EF444410",
     borderWidth: 1,
-    borderColor: "#EF444440",
+    borderColor: "#EF444430",
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
+    gap: 6,
   },
   deleteBtnText: {
-    color: "#EF4444",
+    color: THEME.colors.danger,
     fontWeight: "600",
-    fontSize: 15,
-    marginLeft: 6,
+    fontSize: 13,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(11, 15, 25, 0.95)",
+    paddingTop: 40,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    color: THEME.colors.textPrimary,
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  modalCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: THEME.colors.cardBg,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalImageContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalImage: {
+    width: "100%",
+    height: "100%",
   },
 });

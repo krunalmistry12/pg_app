@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useRouter } from "expo-router";
 import React from "react";
 import {
   SafeAreaView,
@@ -10,12 +11,12 @@ import {
   View,
 } from "react-native";
 
-// Types for icon string safety
 interface QuickAction {
   id: string;
   title: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
+  route: string;
 }
 
 interface RecentActivity {
@@ -27,96 +28,136 @@ interface RecentActivity {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
+
   const quickActions: QuickAction[] = [
     {
       id: "1",
       title: "Add Tenant",
       icon: "person-add-outline",
       color: "#3B82F6",
+      route: "/add-tenant",
     },
-    { id: "2", title: "Add Room", icon: "business-outline", color: "#8B5CF6" },
-    { id: "3", title: "Allocate", icon: "key-outline", color: "#F59E0B" },
     {
-      id: "4",
+      id: "2",
+      title: "Add Room",
+      icon: "business-outline",
+      color: "#8B5CF6",
+      route: "/add-room",
+    },
+    {
+      id: "3",
       title: "Collect Rent",
       icon: "wallet-outline",
       color: "#10B981",
+      route: "/rent",
+    },
+    {
+      id: "4",
+      title: "Complaints",
+      icon: "alert-circle-outline",
+      color: "#EF4444",
+      route: "/complaints", // Naya feature
+    },
+    {
+      id: "5",
+      title: "Notice Board",
+      icon: "megaphone-outline",
+      color: "#F59E0B",
+      route: "/notices", // Naya feature
+    },
+    {
+      id: "6",
+      title: "Utility Bills",
+      icon: "flash-outline",
+      color: "#06B6D4",
+      route: "/utilities", // Naya feature
     },
   ];
 
   const recentActivities: RecentActivity[] = [
     {
       id: "1",
-      text: "Rahul joined Room 101",
-      time: "10 mins ago",
-      icon: "person-add-outline",
-      color: "#3B82F6",
-    },
-    {
-      id: "2",
-      text: "Rent received ₹5,000",
-      time: "2 hours ago",
-      icon: "cash-outline",
+      text: "Rahul paid August rent ₹6,500",
+      time: "5 mins ago",
+      icon: "checkmark-circle-outline",
       color: "#10B981",
     },
     {
+      id: "2",
+      text: "New maintenance request: Room 202",
+      time: "1 hour ago",
+      icon: "construct-outline",
+      color: "#EF4444",
+    },
+    {
       id: "3",
-      text: "Bed A3 allocated",
-      time: "Yesterday",
-      icon: "bed-outline",
-      color: "#F59E0B",
+      text: "Aman Patel allocated to Room 101-B",
+      time: "3 hours ago",
+      icon: "key-outline",
+      color: "#3B82F6",
     },
     {
       id: "4",
-      text: "Complaint submitted (#102)",
+      text: "Broadcast sent: Water supply shutdown",
       time: "Yesterday",
-      icon: "alert-circle-outline",
-      color: "#EF4444",
+      icon: "megaphone-outline",
+      color: "#F59E0B",
     },
   ];
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>👋 Welcome Back,</Text>
-            <Text style={styles.username}>Kunal</Text>
-          </View>
-          <TouchableOpacity activeOpacity={0.8} style={styles.profileCircle}>
-            <Text style={styles.profileText}>K</Text>
-          </TouchableOpacity>
-        </View>
 
-        {/* Revenue Card Header Banner */}
+      {/* Sticky Header */}
+      <View style={styles.stickyHeader}>
+        <View>
+          <Text style={styles.greeting}>👋 Welcome Back,</Text>
+          <Text style={styles.username}>Kunal Mistry</Text>
+        </View>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={styles.profileCircle}
+          onPress={() => router.push("/profile" as any)}
+        >
+          <Text style={styles.profileText}>K</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        style={styles.container}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 40 }}
+      >
+        {/* Revenue Card Banner */}
         <View style={styles.revenueCard}>
           <View style={styles.revenueHeader}>
-            <Text style={styles.revenueLabel}>Monthly Revenue</Text>
+            <Text style={styles.revenueLabel}>August Revenue Overview</Text>
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>Jul 2026</Text>
+              <Text style={styles.badgeText}>Live</Text>
             </View>
           </View>
 
-          <Text style={styles.revenueAmount}>₹85,000</Text>
+          <Text style={styles.revenueAmount}>₹92,500</Text>
 
           <View style={styles.revenueFooter}>
-            <Ionicons name="time-outline" size={16} color="#93C5FD" />
+            <Ionicons name="alert-circle-outline" size={16} color="#FCA5A5" />
             <Text style={styles.pendingText}>
-              Pending Rent: <Text style={styles.boldText}>₹12,000</Text>
+              Pending Collection: <Text style={styles.boldText}>₹14,000</Text>
             </Text>
           </View>
         </View>
 
-        {/* Quick Actions Bar */}
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
+        {/* Quick Actions Grid (Expanded) */}
+        <Text style={styles.sectionTitle}>Management Tools</Text>
         <View style={styles.actionGrid}>
           {quickActions.map((action) => (
             <TouchableOpacity
               key={action.id}
               style={styles.actionButton}
               activeOpacity={0.7}
+              onPress={() => router.push(action.route as any)}
             >
               <View
                 style={[
@@ -132,50 +173,40 @@ export default function Dashboard() {
         </View>
 
         {/* Key Metrics Grid */}
-        <Text style={styles.sectionTitle}>Property Overview</Text>
+        <Text style={styles.sectionTitle}>Property Metrics</Text>
         <View style={styles.statsContainer}>
-          <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.card}
+            onPress={() => router.push("/flat-manager" as any)}
+          >
             <View style={styles.cardHeader}>
-              <Ionicons name="business-outline" size={20} color="#3B82F6" />
+              <View style={styles.iconBoxBlue}>
+                <Ionicons name="business" size={18} color="#3B82F6" />
+              </View>
               <Text style={styles.cardTitle}>Total Rooms</Text>
             </View>
-            <Text style={styles.cardValue}>25</Text>
-          </View>
+            <Text style={styles.cardValue}>24</Text>
+          </TouchableOpacity>
 
-          <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.card}
+            onPress={() => router.push("/tenants" as any)}
+          >
             <View style={styles.cardHeader}>
-              <Ionicons name="people-outline" size={20} color="#10B981" />
-              <Text style={styles.cardTitle}>Tenants</Text>
+              <View style={styles.iconBoxGreen}>
+                <Ionicons name="people" size={18} color="#10B981" />
+              </View>
+              <Text style={styles.cardTitle}>Active Tenants</Text>
             </View>
-            <Text style={styles.cardValue}>78</Text>
-          </View>
-
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="bed-outline" size={20} color="#F59E0B" />
-              <Text style={styles.cardTitle}>Occupied Beds</Text>
-            </View>
-            <Text style={styles.cardValue}>65</Text>
-          </View>
-
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Ionicons
-                name="checkmark-circle-outline"
-                size={20}
-                color="#22C55E"
-              />
-              <Text style={styles.cardTitle}>Vacant Beds</Text>
-            </View>
-            <Text style={styles.cardValue}>15</Text>
-          </View>
+            <Text style={styles.cardValue}>68</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Occupancy Card */}
+        {/* Occupancy Rate Bar */}
         <View style={styles.occupancyCard}>
           <View style={styles.occupancyHeader}>
-            <Text style={styles.cardSectionTitle}>Occupancy Rate</Text>
-            <Text style={styles.occupancyValue}>81%</Text>
+            <Text style={styles.cardSectionTitle}>Overall Occupancy</Text>
+            <Text style={styles.occupancyValue}>85% (Filled)</Text>
           </View>
           <View style={styles.progressBg}>
             <View style={styles.progressFill} />
@@ -184,9 +215,9 @@ export default function Dashboard() {
 
         {/* Recent Activity List */}
         <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Recent Activity</Text>
+          <Text style={styles.sectionTitle}>Recent Activity Log</Text>
           <TouchableOpacity>
-            <Text style={styles.seeAllText}>See All</Text>
+            <Text style={styles.seeAllText}>View All</Text>
           </TouchableOpacity>
         </View>
 
@@ -226,30 +257,34 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#0F172A",
   },
-  container: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  header: {
+  stickyHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 15,
-    marginBottom: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: "#0F172A",
+    borderBottomWidth: 1,
+    borderBottomColor: "#1E293B",
+  },
+  container: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 15,
   },
   greeting: {
     color: "#94A3B8",
-    fontSize: 14,
+    fontSize: 13,
   },
   username: {
     color: "#F8FAFC",
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: "700",
   },
   profileCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: "#2563EB",
     justifyContent: "center",
     alignItems: "center",
@@ -259,10 +294,8 @@ const styles = StyleSheet.create({
   profileText: {
     color: "#FFFFFF",
     fontWeight: "bold",
-    fontSize: 16,
+    fontSize: 15,
   },
-
-  // Revenue Card
   revenueCard: {
     backgroundColor: "#1E3A8A",
     padding: 20,
@@ -304,7 +337,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   pendingText: {
-    color: "#93C5FD",
+    color: "#FCA5A5",
     fontSize: 13,
     marginLeft: 6,
   },
@@ -312,8 +345,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "700",
   },
-
-  // Quick Actions
   sectionTitle: {
     color: "#F8FAFC",
     fontSize: 18,
@@ -322,21 +353,27 @@ const styles = StyleSheet.create({
   },
   actionGrid: {
     flexDirection: "row",
+    flexWrap: "wrap",
     justifyContent: "space-between",
     marginBottom: 24,
   },
   actionButton: {
-    width: "23%",
+    width: "31%",
     alignItems: "center",
+    marginBottom: 16,
+    backgroundColor: "#1E293B",
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#334155",
   },
   actionIconContainer: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 6,
-    backgroundColor: "#1E293B",
+    marginBottom: 8,
   },
   actionText: {
     color: "#CBD5E1",
@@ -344,19 +381,16 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     textAlign: "center",
   },
-
-  // Stats Grid
   statsContainer: {
     flexDirection: "row",
-    flexWrap: "wrap",
     justifyContent: "space-between",
+    marginBottom: 20,
   },
   card: {
     width: "48%",
     backgroundColor: "#1E293B",
     borderRadius: 16,
     padding: 16,
-    marginBottom: 14,
     borderWidth: 1,
     borderColor: "#334155",
   },
@@ -365,19 +399,35 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 8,
   },
+  iconBoxBlue: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "rgba(59, 130, 246, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 8,
+  },
+  iconBoxGreen: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 8,
+  },
   cardTitle: {
     color: "#94A3B8",
     fontSize: 13,
-    marginLeft: 8,
     fontWeight: "500",
   },
   cardValue: {
     color: "#FFFFFF",
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: "700",
+    marginTop: 4,
   },
-
-  // Occupancy Card
   occupancyCard: {
     backgroundColor: "#1E293B",
     padding: 18,
@@ -399,7 +449,7 @@ const styles = StyleSheet.create({
   },
   occupancyValue: {
     color: "#22C55E",
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
   },
   progressBg: {
@@ -409,13 +459,11 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   progressFill: {
-    width: "81%",
+    width: "85%",
     height: "100%",
     backgroundColor: "#22C55E",
     borderRadius: 4,
   },
-
-  // Activity List
   sectionHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",

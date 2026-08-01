@@ -602,7 +602,8 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: SPACING.sm,
-  },moreBedsPill: {
+  },
+  moreBedsPill: {
     backgroundColor: "rgba(56, 189, 248, 0.1)",
     borderColor: COLORS.accent,
   },

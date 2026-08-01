@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   FlatList,
+  Linking,
   Modal,
   Pressable,
   SafeAreaView,
@@ -13,10 +14,12 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { COLORS, RADIUS, SPACING, TYPOGRAPHY } from "@/src/constants/theme";
 
 interface RentItem {
   id: string;
   tenant: string;
+  phone?: string;
   amount: number;
   status: "Paid" | "Due";
   room: string;
@@ -28,6 +31,7 @@ const initialRents: RentItem[] = [
   {
     id: "1",
     tenant: "Rahul Sharma",
+    phone: "9876543210",
     amount: 6500,
     status: "Paid",
     room: "101",
@@ -37,6 +41,7 @@ const initialRents: RentItem[] = [
   {
     id: "2",
     tenant: "Amit Patel",
+    phone: "9876543211",
     amount: 7000,
     status: "Due",
     room: "205",
@@ -46,6 +51,7 @@ const initialRents: RentItem[] = [
   {
     id: "3",
     tenant: "Priya Shah",
+    phone: "9876543212",
     amount: 6000,
     status: "Paid",
     room: "301",
@@ -55,6 +61,7 @@ const initialRents: RentItem[] = [
   {
     id: "4",
     tenant: "Vikram Malhotra",
+    phone: "9876543213",
     amount: 8500,
     status: "Due",
     room: "402",
@@ -64,6 +71,7 @@ const initialRents: RentItem[] = [
   {
     id: "5",
     tenant: "Karan Mehta",
+    phone: "9876543214",
     amount: 7500,
     status: "Paid",
     room: "102",
@@ -73,6 +81,7 @@ const initialRents: RentItem[] = [
   {
     id: "6",
     tenant: "Suresh Raina",
+    phone: "9876543215",
     amount: 6000,
     status: "Paid",
     room: "201",
@@ -103,6 +112,9 @@ export default function RentManagement() {
   const [searchRoom, setSearchRoom] = useState<string>("");
   const [statusTab, setStatusTab] = useState<FilterTab>("All");
   const [selectedTenant, setSelectedTenant] = useState<RentItem | null>(null);
+  const [historyTenant, setHistoryTenant] = useState<RentItem | null>(null);
+  const [whatsappTarget, setWhatsappTarget] = useState<RentItem | null>(null);
+  const [customPhoneInput, setCustomPhoneInput] = useState<string>("");
   const [isMonthPickerVisible, setIsMonthPickerVisible] =
     useState<boolean>(false);
 
@@ -169,9 +181,44 @@ export default function RentManagement() {
   const collectionPercentage =
     totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 100) : 0;
 
+  // Open WhatsApp with selected contact number
+  const executeWhatsAppSend = (phoneToUse: string, item: RentItem) => {
+    if (!phoneToUse.trim()) {
+      alert("Please provide a valid phone number!");
+      return;
+    }
+    const cleanPhone = phoneToUse.replace(/[^0-9]/g, "");
+    const formattedPhone = cleanPhone.startsWith("91") ? `+${cleanPhone}` : `+91${cleanPhone}`;
+    
+    const message = encodeURIComponent(
+      `Hello ${item.tenant}, your rent of ₹${item.amount.toLocaleString()} for Room ${item.room} (${item.month} ${item.year}) is currently Due. Please clear it at your earliest convenience. - PG ADMIN HUB`,
+    );
+    const url = `https://wa.me/${formattedPhone}?text=${message}`;
+    
+    Linking.openURL(url).catch(() => {
+      alert("WhatsApp is not installed or unable to open link.");
+    });
+    setWhatsappTarget(null);
+  };
+
+  // Bulk WhatsApp Reminder for All Due Rents in Current Period
+  const sendBulkWhatsAppReminders = () => {
+    const dueItems = periodRents.filter((r) => r.status === "Due");
+    if (dueItems.length === 0) {
+      alert("No pending dues found for this month!");
+      return;
+    }
+
+    const firstItem = dueItems[0];
+    const message = encodeURIComponent(
+      `Hello ${firstItem.tenant}, your rent of ₹${firstItem.amount.toLocaleString()} for Room ${firstItem.room} (${selectedMonth} ${selectedYear}) is Due. - PG ADMIN HUB`,
+    );
+    Linking.openURL(`https://wa.me/+91${firstItem.phone || ""}?text=${message}`);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0B0F19" />
+      <StatusBar barStyle="light-content" backgroundColor={COLORS.bgDark} />
 
       {/* Header Bar */}
       <View style={styles.header}>
@@ -219,7 +266,7 @@ export default function RentManagement() {
       )}
 
       {/* Overview Analytics Banner */}
-      <View style={[styles.analyticsCard, isCompactScreen && { padding: 12 }]}>
+      <View style={[styles.analyticsCard, isCompactScreen && { padding: SPACING.md }]}>
         <View style={styles.progressHeader}>
           <Text style={styles.analyticsTitle}>Collection Overview</Text>
           <Text style={styles.progressPercent}>
@@ -240,14 +287,14 @@ export default function RentManagement() {
         <View style={styles.metricGrid}>
           <View>
             <Text style={styles.metricLabel}>COLLECTED</Text>
-            <Text style={[styles.metricValue, { color: "#10B981" }]}>
+            <Text style={[styles.metricValue, { color: COLORS.success }]}>
               ₹{totalCollected.toLocaleString()}
             </Text>
           </View>
           <View style={styles.metricDivider} />
           <View>
             <Text style={styles.metricLabel}>PENDING DUE</Text>
-            <Text style={[styles.metricValue, { color: "#F59E0B" }]}>
+            <Text style={[styles.metricValue, { color: COLORS.warning }]}>
               ₹{totalPending.toLocaleString()}
             </Text>
           </View>
@@ -261,38 +308,50 @@ export default function RentManagement() {
           <TextInput
             style={styles.searchInput}
             placeholder="Search tenant or room..."
-            placeholderTextColor="#64748B"
+            placeholderTextColor={COLORS.textMuted}
             value={searchRoom}
             onChangeText={setSearchRoom}
           />
           {searchRoom.length > 0 && (
             <TouchableOpacity onPress={() => setSearchRoom("")}>
-              <Text style={{ color: "#94A3B8" }}>✕</Text>
+              <Text style={{ color: COLORS.textSecondary }}>✕</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Quick Filter Tabs */}
-        <View style={styles.segmentedControl}>
-          {(["All", "Paid", "Due"] as FilterTab[]).map((tab) => {
-            const active = statusTab === tab;
-            return (
-              <TouchableOpacity
-                key={tab}
-                style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                onPress={() => setStatusTab(tab)}
-              >
-                <Text
-                  style={[
-                    styles.segmentText,
-                    active && styles.segmentTextActive,
-                  ]}
+        {/* Quick Filter Tabs & Bulk WhatsApp Option */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: SPACING.sm }}>
+          <View style={[styles.segmentedControl, { flex: 1 }]}>
+            {(["All", "Paid", "Due"] as FilterTab[]).map((tab) => {
+              const active = statusTab === tab;
+              return (
+                <TouchableOpacity
+                  key={tab}
+                  style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+                  onPress={() => setStatusTab(tab)}
                 >
-                  {tab}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      active && styles.segmentTextActive,
+                    ]}
+                  >
+                    {tab}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Bulk WhatsApp Reminder Button */}
+          {statusTab === "Due" && totalPending > 0 && (
+            <TouchableOpacity
+              style={styles.bulkRemindBtn}
+              onPress={sendBulkWhatsAppReminders}
+            >
+              <Text style={styles.bulkRemindText}>📢 Bulk Remind</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -301,7 +360,7 @@ export default function RentManagement() {
         data={filteredRents}
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 20 }}
+        contentContainerStyle={{ paddingBottom: SPACING.xxl }}
         ListEmptyComponent={
           <View style={styles.emptyCard}>
             <Text style={styles.emptyIcon}>📋</Text>
@@ -317,9 +376,24 @@ export default function RentManagement() {
           return (
             <View style={styles.tenantCard}>
               <View style={styles.cardHeader}>
-                {/* Room Pill Badge */}
-                <View style={styles.roomTag}>
-                  <Text style={styles.roomTagText}>ROOM {item.room}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: SPACING.sm }}>
+                  {/* Room Pill Badge */}
+                  <View style={styles.roomTag}>
+                    <Text style={styles.roomTagText}>ROOM {item.room}</Text>
+                  </View>
+
+                  {/* WhatsApp Reminder Icon -> Opens Contact Picker Modal */}
+                  {!isPaid && (
+                    <TouchableOpacity
+                      style={styles.remindIconBtn}
+                      onPress={() => {
+                        setWhatsappTarget(item);
+                        setCustomPhoneInput(item.phone || "");
+                      }}
+                    >
+                      <Text style={{ fontSize: 12 }}>💬</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
 
                 {/* Status Badge */}
@@ -349,9 +423,9 @@ export default function RentManagement() {
               <View style={styles.cardBody}>
                 <View>
                   <Text style={styles.tenantName}>{item.tenant}</Text>
-                  <Text style={styles.billingPeriod}>
-                    Billing Period: {item.month} {item.year}
-                  </Text>
+                  <TouchableOpacity onPress={() => setHistoryTenant(item)}>
+                    <Text style={styles.historyLinkText}>View History ↗</Text>
+                  </TouchableOpacity>
                 </View>
 
                 <View style={{ alignItems: "flex-end" }}>
@@ -371,6 +445,81 @@ export default function RentManagement() {
           );
         }}
       />
+
+      {/* WhatsApp Contact Selector / Picker Modal */}
+      <Modal
+        visible={!!whatsappTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setWhatsappTarget(null)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setWhatsappTarget(null)}
+        >
+          <View style={styles.modalBox}>
+            <View style={styles.historyModalHeader}>
+              <View>
+                <Text style={styles.modalHeaderTitle}>Select WhatsApp Contact</Text>
+                <Text style={styles.modalHeaderSub}>
+                  {whatsappTarget?.tenant} • Room {whatsappTarget?.room}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.closeIconBtn}
+                onPress={() => setWhatsappTarget(null)}
+              >
+                <Text style={{ color: COLORS.textPrimary, fontWeight: "700" }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Registered Phone Option */}
+            {whatsappTarget?.phone ? (
+              <TouchableOpacity
+                style={styles.contactOptionRow}
+                onPress={() => executeWhatsAppSend(whatsappTarget.phone!, whatsappTarget)}
+              >
+                <View>
+                  <Text style={{ color: COLORS.textPrimary, fontWeight: "600", fontSize: 13 }}>
+                    Registered Contact
+                  </Text>
+                  <Text style={{ color: COLORS.accent, fontSize: 13, marginTop: 2 }}>
+                    +91 {whatsappTarget.phone}
+                  </Text>
+                </View>
+                <Text style={{ color: COLORS.success, fontWeight: "700" }}>Send 💬</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={{ color: COLORS.textMuted, fontSize: 12, marginBottom: SPACING.md }}>
+                No registered phone number found on file.
+              </Text>
+            )}
+
+            {/* Custom Phone Number Input Option */}
+            <View style={{ marginTop: SPACING.md }}>
+              <Text style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: SPACING.xs }}>
+                Or enter custom WhatsApp number:
+              </Text>
+              <View style={{ flexDirection: "row", gap: SPACING.sm }}>
+                <TextInput
+                  style={[styles.searchInput, { flex: 1, height: 40 }]}
+                  placeholder="Enter 10-digit number"
+                  placeholderTextColor={COLORS.textMuted}
+                  keyboardType="phone-pad"
+                  value={customPhoneInput}
+                  onChangeText={setCustomPhoneInput}
+                />
+                <TouchableOpacity
+                  style={[styles.bulkRemindBtn, { paddingHorizontal: SPACING.lg }]}
+                  onPress={() => whatsappTarget && executeWhatsAppSend(customPhoneInput, whatsappTarget)}
+                >
+                  <Text style={styles.bulkRemindText}>Send</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
 
       {/* Month Selection Modal */}
       <Modal
@@ -411,13 +560,69 @@ export default function RentManagement() {
                       {m}
                     </Text>
                     {isSelected && (
-                      <Text style={{ color: "#38BDF8", fontWeight: "700" }}>
+                      <Text style={{ color: COLORS.accent, fontWeight: "700" }}>
                         ✓
                       </Text>
                     )}
                   </TouchableOpacity>
                 );
               })}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Payment History Modal */}
+      <Modal
+        visible={!!historyTenant}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setHistoryTenant(null)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setHistoryTenant(null)}
+        >
+          <View style={styles.modalBox}>
+            <View style={styles.historyModalHeader}>
+              <View>
+                <Text style={styles.modalHeaderTitle}>Payment History</Text>
+                <Text style={styles.modalHeaderSub}>
+                  {historyTenant?.tenant} • Room {historyTenant?.room}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.closeIconBtn}
+                onPress={() => setHistoryTenant(null)}
+              >
+                <Text style={{ color: COLORS.textPrimary, fontWeight: "700" }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+              {rents
+                .filter((r) => r.tenant === historyTenant?.tenant)
+                .map((record) => (
+                  <View key={record.id} style={styles.historyRow}>
+                    <Text style={{ color: COLORS.textPrimary, fontSize: 13 }}>
+                      {record.month} {record.year}
+                    </Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: SPACING.md }}>
+                      <Text style={{ color: COLORS.textSecondary, fontSize: 13 }}>
+                        ₹{record.amount.toLocaleString()}
+                      </Text>
+                      <Text
+                        style={{
+                          color: record.status === "Paid" ? COLORS.successText : COLORS.warningText,
+                          fontWeight: "700",
+                          fontSize: 12,
+                        }}
+                      >
+                        {record.status}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
             </ScrollView>
           </View>
         </Pressable>
@@ -473,98 +678,98 @@ export default function RentManagement() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0B0F19",
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    backgroundColor: COLORS.background,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.sm,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: SPACING.md,
   },
   brandTitle: {
-    color: "#38BDF8",
+    color: COLORS.accent,
     fontSize: 10,
     fontWeight: "800",
     letterSpacing: 1.2,
   },
   title: {
-    color: "#F8FAFC",
+    color: COLORS.textPrimary,
     fontSize: 22,
     fontWeight: "700",
   },
   monthPill: {
-    backgroundColor: "#1E293B",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.full,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: COLORS.border,
   },
   monthPillText: {
-    color: "#38BDF8",
+    color: COLORS.accent,
     fontSize: 13,
     fontWeight: "600",
   },
   yearRow: {
-    marginBottom: 14,
+    marginBottom: SPACING.md,
   },
   yearChip: {
-    backgroundColor: "#111827",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 12,
-    marginRight: 8,
+    backgroundColor: COLORS.cardBg,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.lg,
+    marginRight: SPACING.sm,
     borderWidth: 1,
-    borderColor: "#1E293B",
+    borderColor: COLORS.border,
   },
   activeYearChip: {
-    backgroundColor: "#2563EB",
-    borderColor: "#3B82F6",
+    backgroundColor: COLORS.primaryHover,
+    borderColor: COLORS.primary,
   },
   yearChipText: {
-    color: "#64748B",
+    color: COLORS.textMuted,
     fontSize: 12,
     fontWeight: "600",
   },
   activeYearChipText: {
-    color: "#FFFFFF",
+    color: COLORS.textWhite,
   },
   analyticsCard: {
-    backgroundColor: "#111827",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: COLORS.cardBg,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
     borderWidth: 1,
-    borderColor: "#1E293B",
+    borderColor: COLORS.border,
   },
   progressHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: SPACING.sm,
   },
   analyticsTitle: {
-    color: "#94A3B8",
+    color: COLORS.textSecondary,
     fontSize: 12,
     fontWeight: "600",
   },
   progressPercent: {
-    color: "#10B981",
+    color: COLORS.success,
     fontSize: 12,
     fontWeight: "700",
   },
   progressBarTrack: {
     height: 6,
-    backgroundColor: "#1E293B",
-    borderRadius: 3,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.full,
     overflow: "hidden",
-    marginBottom: 14,
+    marginBottom: SPACING.lg,
   },
   progressBarFill: {
     height: "100%",
-    backgroundColor: "#10B981",
+    backgroundColor: COLORS.success,
   },
   metricGrid: {
     flexDirection: "row",
@@ -572,7 +777,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   metricLabel: {
-    color: "#64748B",
+    color: COLORS.textMuted,
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 0.5,
@@ -585,132 +790,156 @@ const styles = StyleSheet.create({
   metricDivider: {
     width: 1,
     height: 28,
-    backgroundColor: "#1E293B",
+    backgroundColor: COLORS.border,
   },
   filterSection: {
-    marginBottom: 14,
-    gap: 10,
+    marginBottom: SPACING.md,
+    gap: SPACING.sm,
   },
   searchBox: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#111827",
-    borderRadius: 12,
+    backgroundColor: COLORS.cardBg,
+    borderRadius: RADIUS.lg,
     borderWidth: 1,
-    borderColor: "#1E293B",
-    paddingHorizontal: 12,
+    borderColor: COLORS.border,
+    paddingHorizontal: SPACING.md,
     height: 42,
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: SPACING.sm,
     fontSize: 12,
   },
   searchInput: {
     flex: 1,
-    color: "#FFFFFF",
+    color: COLORS.textWhite,
     fontSize: 13,
   },
   segmentedControl: {
     flexDirection: "row",
-    backgroundColor: "#111827",
-    borderRadius: 10,
+    backgroundColor: COLORS.cardBg,
+    borderRadius: RADIUS.md,
     padding: 3,
     borderWidth: 1,
-    borderColor: "#1E293B",
+    borderColor: COLORS.border,
   },
   segmentBtn: {
     flex: 1,
     paddingVertical: 7,
     alignItems: "center",
-    borderRadius: 8,
+    borderRadius: RADIUS.sm,
   },
   segmentBtnActive: {
-    backgroundColor: "#1E293B",
+    backgroundColor: COLORS.surface,
   },
   segmentText: {
-    color: "#64748B",
+    color: COLORS.textMuted,
     fontSize: 12,
     fontWeight: "600",
   },
   segmentTextActive: {
-    color: "#F8FAFC",
+    color: COLORS.textPrimary,
+  },
+  bulkRemindBtn: {
+    backgroundColor: COLORS.warningBackground,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.warning,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  bulkRemindText: {
+    color: COLORS.warningText,
+    fontSize: 12,
+    fontWeight: "700",
   },
   tenantCard: {
-    backgroundColor: "#111827",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
+    backgroundColor: COLORS.cardBg,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.md,
     borderWidth: 1,
-    borderColor: "#1E293B",
+    borderColor: COLORS.border,
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: SPACING.md,
   },
   roomTag: {
-    backgroundColor: "#1E293B",
-    paddingHorizontal: 8,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: SPACING.sm,
     paddingVertical: 3,
-    borderRadius: 6,
+    borderRadius: RADIUS.sm,
   },
   roomTagText: {
-    color: "#38BDF8",
+    color: COLORS.accent,
     fontSize: 11,
     fontWeight: "700",
+  },
+  remindIconBtn: {
+    backgroundColor: COLORS.warningBackground,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 3,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.warning,
   },
   statusBadge: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 8,
+    paddingHorizontal: SPACING.sm,
     paddingVertical: 3,
-    borderRadius: 12,
+    borderRadius: RADIUS.full,
   },
   statusDot: {
     width: 6,
     height: 6,
-    borderRadius: 3,
-    marginRight: 6,
+    borderRadius: RADIUS.full,
+    marginRight: SPACING.xs,
   },
-  paidBadge: { backgroundColor: "rgba(16, 185, 129, 0.12)" },
-  dueBadge: { backgroundColor: "rgba(245, 158, 11, 0.12)" },
-  paidDot: { backgroundColor: "#10B981" },
-  dueDot: { backgroundColor: "#F59E0B" },
+  paidBadge: { backgroundColor: COLORS.successBackground },
+  dueBadge: { backgroundColor: COLORS.warningBackground },
+  paidDot: { backgroundColor: COLORS.success },
+  dueDot: { backgroundColor: COLORS.warning },
   statusText: { fontSize: 11, fontWeight: "600" },
-  paidText: { color: "#34D399" },
-  dueText: { color: "#FBBF24" },
+  paidText: { color: COLORS.successText },
+  dueText: { color: COLORS.warningText },
   cardBody: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-end",
   },
   tenantName: {
-    color: "#F8FAFC",
+    color: COLORS.textPrimary,
     fontSize: 15,
     fontWeight: "600",
   },
-  billingPeriod: {
-    color: "#64748B",
+  historyLinkText: {
+    color: COLORS.accent,
     fontSize: 11,
-    marginTop: 2,
+    marginTop: 4,
+    fontWeight: "600",
   },
   amountText: {
-    color: "#F8FAFC",
+    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: "700",
-    marginBottom: 6,
+    marginBottom: SPACING.sm,
   },
   manageBtn: {
-    backgroundColor: "#1E293B",
-    paddingHorizontal: 10,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: SPACING.md,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: RADIUS.sm,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: COLORS.border,
   },
   manageBtnText: {
-    color: "#94A3B8",
+    color: COLORS.textSecondary,
     fontSize: 11,
     fontWeight: "600",
   },
@@ -720,83 +949,116 @@ const styles = StyleSheet.create({
   },
   emptyIcon: {
     fontSize: 28,
-    marginBottom: 8,
+    marginBottom: SPACING.sm,
   },
   emptyTitle: {
-    color: "#F8FAFC",
+    color: COLORS.textPrimary,
     fontSize: 15,
     fontWeight: "600",
   },
   emptySub: {
-    color: "#64748B",
+    color: COLORS.textMuted,
     fontSize: 12,
     textAlign: "center",
-    marginTop: 4,
-    paddingHorizontal: 20,
+    marginTop: SPACING.xs,
+    paddingHorizontal: SPACING.xxl,
   },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.7)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 20,
+    padding: SPACING.xl,
   },
   modalBox: {
     width: "100%",
-    backgroundColor: "#111827",
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: COLORS.cardBg,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.xl,
     borderWidth: 1,
-    borderColor: "#1E293B",
+    borderColor: COLORS.border,
   },
   modalHeaderTitle: {
-    color: "#FFFFFF",
+    color: COLORS.textWhite,
     fontSize: 17,
     fontWeight: "700",
   },
   modalHeaderSub: {
-    color: "#64748B",
+    color: COLORS.textMuted,
     fontSize: 12,
-    marginTop: 4,
-    marginBottom: 16,
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.lg,
+  },
+  historyModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: SPACING.md,
+  },
+  closeIconBtn: {
+    backgroundColor: COLORS.surface,
+    width: 28,
+    height: 28,
+    borderRadius: RADIUS.full,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  contactOptionRow: {
+    backgroundColor: COLORS.surface,
+    padding: SPACING.md,
+    borderRadius: RADIUS.md,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   monthRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.md,
+    borderRadius: RADIUS.sm,
   },
   monthRowActive: {
-    backgroundColor: "rgba(56, 189, 248, 0.1)",
+    backgroundColor: COLORS.accentBackground,
   },
   monthRowText: {
-    color: "#94A3B8",
+    color: COLORS.textSecondary,
     fontSize: 14,
   },
   monthRowTextActive: {
-    color: "#FFFFFF",
+    color: COLORS.textWhite,
     fontWeight: "700",
   },
-  actionSubmitBtn: {
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    marginBottom: 10,
+  historyRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: SPACING.sm + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  btnSuccess: { backgroundColor: "#10B981" },
-  btnWarning: { backgroundColor: "#EAB308" },
+  actionSubmitBtn: {
+    paddingVertical: SPACING.md,
+    borderRadius: RADIUS.md,
+    alignItems: "center",
+    marginBottom: SPACING.sm,
+  },
+  btnSuccess: { backgroundColor: COLORS.success },
+  btnWarning: { backgroundColor: COLORS.warning },
   actionSubmitText: {
-    color: "#FFFFFF",
+    color: COLORS.textWhite,
     fontSize: 14,
     fontWeight: "700",
   },
   actionCancelBtn: {
-    paddingVertical: 12,
+    paddingVertical: SPACING.md,
     alignItems: "center",
   },
   actionCancelText: {
-    color: "#64748B",
+    color: COLORS.textMuted,
     fontSize: 14,
     fontWeight: "600",
   },
