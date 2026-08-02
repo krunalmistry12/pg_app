@@ -43,7 +43,7 @@ export default function Dashboard() {
       title: "Add Room",
       icon: "business-outline",
       color: "#8B5CF6",
-      route: "/add-room",
+      route: "/add-2bhk-flat",
     },
     {
       id: "3",
