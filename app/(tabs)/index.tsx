@@ -1,12 +1,15 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useRef, useState } from "react";
 import {
+  Animated,
+  Modal,
   SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -27,8 +30,70 @@ interface RecentActivity {
   color: string;
 }
 
+interface AlertItem {
+  id: string;
+  type: "rent" | "maintenance" | "notice";
+  title: string;
+  subtitle: string;
+  time: string;
+  route: string;
+  color: string;
+}
+
 export default function Dashboard() {
   const router = useRouter();
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Explicitly false so it stays hidden initially
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const scrollY = useRef(new Animated.Value(0)).current;
+
+  // Notifications State
+  const [alerts, setAlerts] = useState<AlertItem[]>([
+    {
+      id: "1",
+      type: "rent",
+      title: "Action Required: Rent Dues",
+      subtitle: "3 tenants have pending rent dues past due date.",
+      time: "10 mins ago",
+      route: "/rent",
+      color: "#EF4444",
+    },
+    {
+      id: "2",
+      type: "maintenance",
+      title: "New Maintenance Request",
+      subtitle: "Room 202 reported a leaking pipe issue.",
+      time: "1 hour ago",
+      route: "/complaints",
+      color: "#F59E0B",
+    },
+    {
+      id: "3",
+      type: "notice",
+      title: "Broadcast Notice Sent",
+      subtitle: "Water supply shutdown scheduled for tomorrow.",
+      time: "Yesterday",
+      route: "/notices",
+      color: "#3B82F6",
+    },
+  ]);
+
+  const [isNotificationModalVisible, setIsNotificationModalVisible] =
+    useState(false);
+
+  const handleDismissAlert = (id: string) => {
+    setAlerts((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  // Scroll handler to detect deep pull down (swipe down from top)
+  const handleScrollRelease = (e: any) => {
+    const offsetY = e.nativeEvent.contentOffset.y;
+    // Agar user top par hai aur niche ki taraf pull karta hai (negative offset)
+    if (offsetY < -50) {
+      setIsSearchVisible(true);
+    }
+  };
 
   const quickActions: QuickAction[] = [
     {
@@ -57,21 +122,21 @@ export default function Dashboard() {
       title: "Complaints",
       icon: "alert-circle-outline",
       color: "#EF4444",
-      route: "/complaints", // Naya feature
+      route: "/complaints",
     },
     {
       id: "5",
       title: "Notice Board",
       icon: "megaphone-outline",
       color: "#F59E0B",
-      route: "/notices", // Naya feature
+      route: "/notices",
     },
     {
       id: "6",
       title: "Utility Bills",
       icon: "flash-outline",
       color: "#06B6D4",
-      route: "/utilities", // Naya feature
+      route: "/utilities",
     },
   ];
 
@@ -116,40 +181,179 @@ export default function Dashboard() {
           <Text style={styles.greeting}>👋 Welcome Back,</Text>
           <Text style={styles.username}>Kunal Mistry</Text>
         </View>
-        <TouchableOpacity
-          activeOpacity={0.8}
-          style={styles.profileCircle}
-          onPress={() => router.push("/profile" as any)}
-        >
-          <Text style={styles.profileText}>K</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          {/* Search Toggle Icon Button in Header for quick access */}
+          {/* <TouchableOpacity
+            style={[
+              styles.iconButton,
+              isSearchVisible && {
+                borderColor: "#3B82F6",
+                backgroundColor: "#1E3A8A",
+              },
+            ]}
+            onPress={() => setIsSearchVisible(!isSearchVisible)}
+          >
+            <Ionicons name="search-outline" size={20} color="#F8FAFC" />
+          </TouchableOpacity> */}
+
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={() => setIsNotificationModalVisible(true)}
+          >
+            <Ionicons name="notifications-outline" size={20} color="#F8FAFC" />
+            {alerts.length > 0 && <View style={styles.notificationBadge} />}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={styles.profileCircle}
+            onPress={() => router.push("/profile" as any)}
+          >
+            <Text style={styles.profileText}>K</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
         style={styles.container}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
+        onScrollEndDrag={handleScrollRelease}
+        scrollEventThrottle={16}
       >
+        {/* Subtle Pull Hint (Only shows when search is hidden) */}
+        {/* {!isSearchVisible && (
+          <TouchableOpacity
+            style={styles.pullHintBox}
+            onPress={() => setIsSearchVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="chevron-down-outline" size={13} color="#64748B" />
+            <Text style={styles.pullHintText}>
+              Pull down or tap search icon above
+            </Text>
+          </TouchableOpacity>
+        )} */}
+
+        {/* Global Quick Search Bar - Conditionally Rendered */}
+        {isSearchVisible && (
+          <View style={styles.searchContainer}>
+            <Ionicons
+              name="search-outline"
+              size={18}
+              color="#64748B"
+              style={styles.searchIcon}
+            />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search tenant, room no, or payment..."
+              placeholderTextColor="#64748B"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus={true}
+            />
+            <TouchableOpacity
+              onPress={() => {
+                setSearchQuery("");
+                setIsSearchVisible(false);
+              }}
+            >
+              <Ionicons name="close-circle" size={18} color="#64748B" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Dynamic Alert Banner */}
+        {alerts.length > 0 && (
+          <View
+            style={[
+              styles.alertBanner,
+              {
+                backgroundColor: `${alerts[0].color}12`,
+                borderColor: `${alerts[0].color}40`,
+              },
+            ]}
+          >
+            <TouchableOpacity
+              style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
+              activeOpacity={0.8}
+              onPress={() => router.push(alerts[0].route as any)}
+            >
+              <View
+                style={[
+                  styles.alertIconBox,
+                  { backgroundColor: `${alerts[0].color}25` },
+                ]}
+              >
+                <Ionicons
+                  name={
+                    alerts[0].type === "rent"
+                      ? "alert"
+                      : alerts[0].type === "maintenance"
+                        ? "construct"
+                        : "megaphone"
+                  }
+                  size={18}
+                  color={alerts[0].color}
+                />
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={[styles.alertTitle, { color: alerts[0].color }]}>
+                    {alerts[0].title}
+                  </Text>
+                  <Text style={styles.alertCounter}>
+                    {alerts.length} Pending
+                  </Text>
+                </View>
+                <Text style={styles.alertSubtitle} numberOfLines={1}>
+                  {alerts[0].subtitle}
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.nextAlertBtn}
+              onPress={() => setIsNotificationModalVisible(true)}
+            >
+              <Ionicons name="chevron-forward" size={16} color="#94A3B8" />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Revenue Card Banner */}
         <View style={styles.revenueCard}>
           <View style={styles.revenueHeader}>
             <Text style={styles.revenueLabel}>August Revenue Overview</Text>
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>Live</Text>
+              <Text style={styles.badgeText}>Live Sync</Text>
             </View>
           </View>
-
           <Text style={styles.revenueAmount}>₹92,500</Text>
-
-          <View style={styles.revenueFooter}>
-            <Ionicons name="alert-circle-outline" size={16} color="#FCA5A5" />
-            <Text style={styles.pendingText}>
-              Pending Collection: <Text style={styles.boldText}>₹14,000</Text>
-            </Text>
+          <View style={styles.financialSplitRow}>
+            <View style={styles.splitBox}>
+              <Text style={styles.splitLabel}>Collected</Text>
+              <Text style={[styles.splitValue, { color: "#34D399" }]}>
+                ₹78,500
+              </Text>
+            </View>
+            <View style={styles.splitDivider} />
+            <View style={styles.splitBox}>
+              <Text style={styles.splitLabel}>Pending Due</Text>
+              <Text style={[styles.splitValue, { color: "#FCA5A5" }]}>
+                ₹14,000
+              </Text>
+            </View>
           </View>
         </View>
 
-        {/* Quick Actions Grid (Expanded) */}
+        {/* Quick Actions Grid */}
         <Text style={styles.sectionTitle}>Management Tools</Text>
         <View style={styles.actionGrid}>
           {quickActions.map((action) => (
@@ -186,6 +390,7 @@ export default function Dashboard() {
               <Text style={styles.cardTitle}>Total Rooms</Text>
             </View>
             <Text style={styles.cardValue}>24</Text>
+            <Text style={styles.cardSubText}>22 Occupied • 2 Vacant</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -199,13 +404,14 @@ export default function Dashboard() {
               <Text style={styles.cardTitle}>Active Tenants</Text>
             </View>
             <Text style={styles.cardValue}>68</Text>
+            <Text style={styles.cardSubText}>+4 joined this month</Text>
           </TouchableOpacity>
         </View>
 
         {/* Occupancy Rate Bar */}
         <View style={styles.occupancyCard}>
           <View style={styles.occupancyHeader}>
-            <Text style={styles.cardSectionTitle}>Overall Occupancy</Text>
+            <Text style={styles.cardSectionTitle}>Overall Occupancy Rate</Text>
             <Text style={styles.occupancyValue}>85% (Filled)</Text>
           </View>
           <View style={styles.progressBg}>
@@ -216,7 +422,7 @@ export default function Dashboard() {
         {/* Recent Activity List */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>Recent Activity Log</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push("/notices" as any)}>
             <Text style={styles.seeAllText}>View All</Text>
           </TouchableOpacity>
         </View>
@@ -248,15 +454,108 @@ export default function Dashboard() {
           ))}
         </View>
       </ScrollView>
+
+      {/* Notifications Bottom Sheet Modal */}
+      <Modal
+        visible={isNotificationModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsNotificationModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.bottomSheetContainer}>
+            <View style={styles.modalHeader}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <Ionicons name="notifications" size={20} color="#3B82F6" />
+                <Text style={styles.modalTitle}>System Notifications</Text>
+                <View style={styles.modalCountBadge}>
+                  <Text style={styles.modalCountText}>{alerts.length}</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsNotificationModalVisible(false)}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={20} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingVertical: 10 }}
+            >
+              {alerts.length === 0 ? (
+                <View style={styles.emptyNotificationBox}>
+                  <Ionicons
+                    name="checkmark-done-circle-outline"
+                    size={48}
+                    color="#334155"
+                  />
+                  <Text style={styles.emptyNotifTitle}>
+                    You're all caught up!
+                  </Text>
+                  <Text style={styles.emptyNotifSub}>
+                    No pending alerts or active requests.
+                  </Text>
+                </View>
+              ) : (
+                alerts.map((item) => (
+                  <View
+                    key={item.id}
+                    style={[
+                      styles.notificationCardItem,
+                      { borderLeftColor: item.color },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      style={{ flex: 1 }}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setIsNotificationModalVisible(false);
+                        router.push(item.route as any);
+                      }}
+                    >
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <Text
+                          style={[styles.notifCardTitle, { color: item.color }]}
+                        >
+                          {item.title}
+                        </Text>
+                        <Text style={styles.notifCardTime}>{item.time}</Text>
+                      </View>
+                      <Text style={styles.notifCardSub}>{item.subtitle}</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.dismissBtn}
+                      onPress={() => handleDismissAlert(item.id)}
+                    >
+                      <Ionicons
+                        name="checkmark-outline"
+                        size={16}
+                        color="#10B981"
+                      />
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: "#0F172A",
-  },
+  safeArea: { flex: 1, backgroundColor: "#0F172A" },
   stickyHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -267,40 +566,91 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#1E293B",
   },
-  container: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 15,
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
+  iconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#1E293B",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#334155",
   },
-  greeting: {
-    color: "#94A3B8",
-    fontSize: 13,
+  notificationBadge: {
+    position: "absolute",
+    top: 8,
+    right: 9,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#EF4444",
   },
-  username: {
-    color: "#F8FAFC",
-    fontSize: 22,
-    fontWeight: "700",
-  },
+  container: { flex: 1, paddingHorizontal: 20, paddingTop: 15 },
+  greeting: { color: "#94A3B8", fontSize: 13 },
+  username: { color: "#F8FAFC", fontSize: 22, fontWeight: "700" },
   profileCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "#2563EB",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
     borderColor: "#3B82F6",
   },
-  profileText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 15,
+  profileText: { color: "#FFFFFF", fontWeight: "bold", fontSize: 15 },
+  pullHintBox: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 6,
+    marginBottom: 10,
+    gap: 4,
+  },
+  pullHintText: { color: "#64748B", fontSize: 11, fontWeight: "500" },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1E293B",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+  searchIcon: { marginRight: 8 },
+  searchInput: { flex: 1, color: "#F8FAFC", fontSize: 14, padding: 0 },
+  alertBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+  },
+  alertIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  alertTitle: { fontSize: 13, fontWeight: "700" },
+  alertSubtitle: { color: "#94A3B8", fontSize: 11, marginTop: 1 },
+  alertCounter: { color: "#64748B", fontSize: 10, fontWeight: "600" },
+  nextAlertBtn: {
+    paddingLeft: 8,
+    paddingVertical: 8,
+    justifyContent: "center",
+    alignItems: "center",
   },
   revenueCard: {
     backgroundColor: "#1E3A8A",
     padding: 20,
     borderRadius: 20,
-    marginBottom: 24,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: "#2563EB",
   },
@@ -309,45 +659,39 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  revenueLabel: {
-    color: "#93C5FD",
-    fontSize: 14,
-    fontWeight: "500",
-  },
+  revenueLabel: { color: "#93C5FD", fontSize: 14, fontWeight: "500" },
   badge: {
     backgroundColor: "rgba(255, 255, 255, 0.15)",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
   },
-  badgeText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "600",
-  },
+  badgeText: { color: "#FFFFFF", fontSize: 12, fontWeight: "600" },
   revenueAmount: {
     color: "#FFFFFF",
     fontSize: 32,
     fontWeight: "800",
-    marginVertical: 8,
+    marginVertical: 6,
   },
-  revenueFooter: {
+  financialSplitRow: {
     flexDirection: "row",
+    backgroundColor: "rgba(15, 23, 42, 0.3)",
+    borderRadius: 12,
+    padding: 10,
+    marginTop: 8,
     alignItems: "center",
-    marginTop: 4,
   },
-  pendingText: {
-    color: "#FCA5A5",
-    fontSize: 13,
-    marginLeft: 6,
-  },
-  boldText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
+  splitBox: { flex: 1, alignItems: "center" },
+  splitLabel: { color: "#93C5FD", fontSize: 11, fontWeight: "500" },
+  splitValue: { fontSize: 14, fontWeight: "700", marginTop: 2 },
+  splitDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
   },
   sectionTitle: {
     color: "#F8FAFC",
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: "700",
     marginBottom: 12,
   },
@@ -355,12 +699,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    marginBottom: 24,
+    marginBottom: 20,
   },
   actionButton: {
     width: "31%",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 14,
     backgroundColor: "#1E293B",
     paddingVertical: 14,
     borderRadius: 16,
@@ -368,8 +712,8 @@ const styles = StyleSheet.create({
     borderColor: "#334155",
   },
   actionIconContainer: {
-    width: 44,
-    height: 44,
+    width: 42,
+    height: 42,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
@@ -384,24 +728,20 @@ const styles = StyleSheet.create({
   statsContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 20,
+    marginBottom: 16,
   },
   card: {
     width: "48%",
     backgroundColor: "#1E293B",
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: "#334155",
   },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-  },
+  cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
   iconBoxBlue: {
-    width: 32,
-    height: 32,
+    width: 30,
+    height: 30,
     borderRadius: 8,
     backgroundColor: "rgba(59, 130, 246, 0.15)",
     justifyContent: "center",
@@ -409,28 +749,25 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   iconBoxGreen: {
-    width: 32,
-    height: 32,
+    width: 30,
+    height: 30,
     borderRadius: 8,
     backgroundColor: "rgba(16, 185, 129, 0.15)",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 8,
   },
-  cardTitle: {
-    color: "#94A3B8",
-    fontSize: 13,
-    fontWeight: "500",
-  },
+  cardTitle: { color: "#94A3B8", fontSize: 12, fontWeight: "500" },
   cardValue: {
     color: "#FFFFFF",
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: "700",
-    marginTop: 4,
+    marginTop: 2,
   },
+  cardSubText: { color: "#64748B", fontSize: 10, marginTop: 4 },
   occupancyCard: {
     backgroundColor: "#1E293B",
-    padding: 18,
+    padding: 16,
     borderRadius: 16,
     marginBottom: 24,
     borderWidth: 1,
@@ -442,16 +779,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
-  cardSectionTitle: {
-    color: "#F8FAFC",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  occupancyValue: {
-    color: "#22C55E",
-    fontSize: 14,
-    fontWeight: "700",
-  },
+  cardSectionTitle: { color: "#F8FAFC", fontSize: 14, fontWeight: "600" },
+  occupancyValue: { color: "#22C55E", fontSize: 13, fontWeight: "700" },
   progressBg: {
     height: 8,
     backgroundColor: "#334155",
@@ -470,17 +799,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
-  seeAllText: {
-    color: "#3B82F6",
-    fontSize: 13,
-    fontWeight: "600",
-  },
+  seeAllText: { color: "#3B82F6", fontSize: 13, fontWeight: "600" },
   activityContainer: {
     backgroundColor: "#1E293B",
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    marginBottom: 30,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: "#334155",
   },
@@ -499,17 +824,76 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 12,
   },
-  activityContent: {
+  activityContent: { flex: 1 },
+  activityText: { color: "#F1F5F9", fontSize: 14, fontWeight: "500" },
+  activityTime: { color: "#64748B", fontSize: 12, marginTop: 2 },
+  modalOverlay: {
     flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.8)",
+    justifyContent: "flex-end",
   },
-  activityText: {
-    color: "#F1F5F9",
-    fontSize: 14,
-    fontWeight: "500",
+  bottomSheetContainer: {
+    backgroundColor: "#1E293B",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 40,
+    maxHeight: "75%",
+    borderWidth: 1,
+    borderColor: "#334155",
   },
-  activityTime: {
-    color: "#64748B",
-    fontSize: 12,
-    marginTop: 2,
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: "#334155",
+    paddingBottom: 12,
+    marginBottom: 10,
+  },
+  modalTitle: { color: "#F8FAFC", fontSize: 16, fontWeight: "700" },
+  modalCountBadge: {
+    backgroundColor: "rgba(59, 130, 246, 0.2)",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  modalCountText: { color: "#3B82F6", fontSize: 11, fontWeight: "700" },
+  closeModalBtn: { padding: 4 },
+  emptyNotificationBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+  emptyNotifTitle: {
+    color: "#F8FAFC",
+    fontSize: 15,
+    fontWeight: "600",
+    marginTop: 12,
+  },
+  emptyNotifSub: { color: "#64748B", fontSize: 12, marginTop: 4 },
+  notificationCardItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#0F172A",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    borderLeftWidth: 4,
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+  notifCardTitle: { fontSize: 13, fontWeight: "700" },
+  notifCardTime: { color: "#64748B", fontSize: 10 },
+  notifCardSub: { color: "#94A3B8", fontSize: 12, marginTop: 4 },
+  dismissBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 10,
   },
 });

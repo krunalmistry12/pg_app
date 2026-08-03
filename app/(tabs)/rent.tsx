@@ -1,3 +1,4 @@
+import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   FlatList,
@@ -14,7 +15,6 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { COLORS, RADIUS, SPACING, TYPOGRAPHY } from "@/src/constants/theme";
 
 interface RentItem {
   id: string;
@@ -121,7 +121,6 @@ export default function RentManagement() {
   const { width } = useWindowDimensions();
   const isCompactScreen = width < 380;
 
-  // Dynamic Year Extraction
   const availableYears = useMemo(() => {
     const existingYears = rents.map((r) => r.year).filter(Boolean);
     const uniqueYears = Array.from(new Set(existingYears));
@@ -139,7 +138,6 @@ export default function RentManagement() {
     }
   }, [availableYears, selectedYear]);
 
-  // Toggle Payment Status
   const toggleStatus = (id: string) => {
     if (!id) return;
     setRents((prev) =>
@@ -152,7 +150,6 @@ export default function RentManagement() {
     setSelectedTenant(null);
   };
 
-  // Safe Multi-layer Filtering
   const filteredRents = rents.filter((item) => {
     const matchesYear = item.year === selectedYear;
     const matchesMonth = item.month === selectedMonth;
@@ -165,7 +162,6 @@ export default function RentManagement() {
     return matchesYear && matchesMonth && matchesTab && matchesSearch;
   });
 
-  // Calculate Metrics for Current Period
   const periodRents = rents.filter(
     (r) => r.year === selectedYear && r.month === selectedMonth,
   );
@@ -181,27 +177,27 @@ export default function RentManagement() {
   const collectionPercentage =
     totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 100) : 0;
 
-  // Open WhatsApp with selected contact number
   const executeWhatsAppSend = (phoneToUse: string, item: RentItem) => {
     if (!phoneToUse.trim()) {
       alert("Please provide a valid phone number!");
       return;
     }
     const cleanPhone = phoneToUse.replace(/[^0-9]/g, "");
-    const formattedPhone = cleanPhone.startsWith("91") ? `+${cleanPhone}` : `+91${cleanPhone}`;
-    
+    const formattedPhone = cleanPhone.startsWith("91")
+      ? `+${cleanPhone}`
+      : `+91${cleanPhone}`;
+
     const message = encodeURIComponent(
       `Hello ${item.tenant}, your rent of ₹${item.amount.toLocaleString()} for Room ${item.room} (${item.month} ${item.year}) is currently Due. Please clear it at your earliest convenience. - PG ADMIN HUB`,
     );
     const url = `https://wa.me/${formattedPhone}?text=${message}`;
-    
+
     Linking.openURL(url).catch(() => {
       alert("WhatsApp is not installed or unable to open link.");
     });
     setWhatsappTarget(null);
   };
 
-  // Bulk WhatsApp Reminder for All Due Rents in Current Period
   const sendBulkWhatsAppReminders = () => {
     const dueItems = periodRents.filter((r) => r.status === "Due");
     if (dueItems.length === 0) {
@@ -213,240 +209,260 @@ export default function RentManagement() {
     const message = encodeURIComponent(
       `Hello ${firstItem.tenant}, your rent of ₹${firstItem.amount.toLocaleString()} for Room ${firstItem.room} (${selectedMonth} ${selectedYear}) is Due. - PG ADMIN HUB`,
     );
-    Linking.openURL(`https://wa.me/+91${firstItem.phone || ""}?text=${message}`);
+    Linking.openURL(
+      `https://wa.me/+91${firstItem.phone || ""}?text=${message}`,
+    );
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bgDark} />
 
-      {/* Header Bar */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.brandTitle}>PG ADMIN HUB</Text>
-          <Text style={styles.title}>Rent Collection</Text>
+      {/* Main Scrollable Content Container to prevent edge clipping */}
+      <View style={styles.contentWrapper}>
+        {/* Header Bar */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.brandTitle}>PG ADMIN HUB</Text>
+            <Text style={styles.title}>Rent Collection</Text>
+          </View>
+
+          {/* Month Selector Pill */}
+          <TouchableOpacity
+            style={styles.monthPill}
+            onPress={() => setIsMonthPickerVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.monthPillText}>
+              📅 {selectedMonth} {selectedYear} ▾
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Month Selector Pill */}
-        <TouchableOpacity
-          style={styles.monthPill}
-          onPress={() => setIsMonthPickerVisible(true)}
+        {/* Year Tabs */}
+        {availableYears.length > 0 && (
+          <View style={styles.yearRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {availableYears.map((y) => {
+                const active = y === selectedYear;
+                return (
+                  <TouchableOpacity
+                    key={y}
+                    style={[styles.yearChip, active && styles.activeYearChip]}
+                    onPress={() => setSelectedYear(y)}
+                  >
+                    <Text
+                      style={[
+                        styles.yearChipText,
+                        active && styles.activeYearChipText,
+                      ]}
+                    >
+                      {y}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Overview Analytics Banner */}
+        <View
+          style={[
+            styles.analyticsCard,
+            isCompactScreen && { padding: SPACING.md },
+          ]}
         >
-          <Text style={styles.monthPillText}>
-            📅 {selectedMonth} {selectedYear} ▾
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <View style={styles.progressHeader}>
+            <Text style={styles.analyticsTitle}>Collection Overview</Text>
+            <Text style={styles.progressPercent}>
+              {collectionPercentage}% Paid
+            </Text>
+          </View>
 
-      {/* Year Tabs */}
-      {availableYears.length > 0 && (
-        <View style={styles.yearRow}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {availableYears.map((y) => {
-              const active = y === selectedYear;
-              return (
-                <TouchableOpacity
-                  key={y}
-                  style={[styles.yearChip, active && styles.activeYearChip]}
-                  onPress={() => setSelectedYear(y)}
-                >
-                  <Text
-                    style={[
-                      styles.yearChipText,
-                      active && styles.activeYearChipText,
-                    ]}
-                  >
-                    {y}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
+          <View style={styles.progressBarTrack}>
+            <View
+              style={[
+                styles.progressBarFill,
+                { width: `${collectionPercentage}%` },
+              ]}
+            />
+          </View>
 
-      {/* Overview Analytics Banner */}
-      <View style={[styles.analyticsCard, isCompactScreen && { padding: SPACING.md }]}>
-        <View style={styles.progressHeader}>
-          <Text style={styles.analyticsTitle}>Collection Overview</Text>
-          <Text style={styles.progressPercent}>
-            {collectionPercentage}% Paid
-          </Text>
+          <View style={styles.metricGrid}>
+            <View>
+              <Text style={styles.metricLabel}>COLLECTED</Text>
+              <Text style={[styles.metricValue, { color: COLORS.success }]}>
+                ₹{totalCollected.toLocaleString()}
+              </Text>
+            </View>
+            <View style={styles.metricDivider} />
+            <View>
+              <Text style={styles.metricLabel}>PENDING DUE</Text>
+              <Text style={[styles.metricValue, { color: COLORS.warning }]}>
+                ₹{totalPending.toLocaleString()}
+              </Text>
+            </View>
+          </View>
         </View>
 
-        {/* Visual Progress Bar */}
-        <View style={styles.progressBarTrack}>
+        {/* Search & Status Filter Section */}
+        <View style={styles.filterSection}>
+          <View style={styles.searchBox}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search tenant or room..."
+              placeholderTextColor={COLORS.textMuted}
+              value={searchRoom}
+              onChangeText={setSearchRoom}
+            />
+            {searchRoom.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchRoom("")}>
+                <Text style={{ color: COLORS.textSecondary }}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
           <View
-            style={[
-              styles.progressBarFill,
-              { width: `${collectionPercentage}%` },
-            ]}
-          />
-        </View>
-
-        <View style={styles.metricGrid}>
-          <View>
-            <Text style={styles.metricLabel}>COLLECTED</Text>
-            <Text style={[styles.metricValue, { color: COLORS.success }]}>
-              ₹{totalCollected.toLocaleString()}
-            </Text>
-          </View>
-          <View style={styles.metricDivider} />
-          <View>
-            <Text style={styles.metricLabel}>PENDING DUE</Text>
-            <Text style={[styles.metricValue, { color: COLORS.warning }]}>
-              ₹{totalPending.toLocaleString()}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Search & Status Filter Section */}
-      <View style={styles.filterSection}>
-        <View style={styles.searchBox}>
-          <Text style={styles.searchIcon}>🔍</Text>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search tenant or room..."
-            placeholderTextColor={COLORS.textMuted}
-            value={searchRoom}
-            onChangeText={setSearchRoom}
-          />
-          {searchRoom.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchRoom("")}>
-              <Text style={{ color: COLORS.textSecondary }}>✕</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Quick Filter Tabs & Bulk WhatsApp Option */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: SPACING.sm }}>
-          <View style={[styles.segmentedControl, { flex: 1 }]}>
-            {(["All", "Paid", "Due"] as FilterTab[]).map((tab) => {
-              const active = statusTab === tab;
-              return (
-                <TouchableOpacity
-                  key={tab}
-                  style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                  onPress={() => setStatusTab(tab)}
-                >
-                  <Text
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: SPACING.sm,
+            }}
+          >
+            <View style={[styles.segmentedControl, { flex: 1 }]}>
+              {(["All", "Paid", "Due"] as FilterTab[]).map((tab) => {
+                const active = statusTab === tab;
+                return (
+                  <TouchableOpacity
+                    key={tab}
                     style={[
-                      styles.segmentText,
-                      active && styles.segmentTextActive,
+                      styles.segmentBtn,
+                      active && styles.segmentBtnActive,
                     ]}
+                    onPress={() => setStatusTab(tab)}
                   >
-                    {tab}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+                    <Text
+                      style={[
+                        styles.segmentText,
+                        active && styles.segmentTextActive,
+                      ]}
+                    >
+                      {tab}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
-          {/* Bulk WhatsApp Reminder Button */}
-          {statusTab === "Due" && totalPending > 0 && (
-            <TouchableOpacity
-              style={styles.bulkRemindBtn}
-              onPress={sendBulkWhatsAppReminders}
-            >
-              <Text style={styles.bulkRemindText}>📢 Bulk Remind</Text>
-            </TouchableOpacity>
-          )}
+            {statusTab === "Due" && totalPending > 0 && (
+              <TouchableOpacity
+                style={styles.bulkRemindBtn}
+                onPress={sendBulkWhatsAppReminders}
+              >
+                <Text style={styles.bulkRemindText}>📢 Bulk Remind</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
-      </View>
 
-      {/* Tenants List */}
-      <FlatList
-        data={filteredRents}
-        keyExtractor={(item) => item.id}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: SPACING.xxl }}
-        ListEmptyComponent={
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyIcon}>📋</Text>
-            <Text style={styles.emptyTitle}>No Tenant Records</Text>
-            <Text style={styles.emptySub}>
-              No {statusTab !== "All" ? statusTab.toLowerCase() : ""} records
-              for {selectedMonth} {selectedYear} matching "{searchRoom}".
-            </Text>
-          </View>
-        }
-        renderItem={({ item }) => {
-          const isPaid = item.status === "Paid";
-          return (
-            <View style={styles.tenantCard}>
-              <View style={styles.cardHeader}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: SPACING.sm }}>
-                  {/* Room Pill Badge */}
-                  <View style={styles.roomTag}>
-                    <Text style={styles.roomTagText}>ROOM {item.room}</Text>
+        {/* Tenants List */}
+        <FlatList
+          data={filteredRents}
+          keyExtractor={(item) => item.id}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: SPACING.xxl }}
+          ListEmptyComponent={
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyIcon}>📋</Text>
+              <Text style={styles.emptyTitle}>No Tenant Records</Text>
+              <Text style={styles.emptySub}>
+                No {statusTab !== "All" ? statusTab.toLowerCase() : ""} records
+                for {selectedMonth} {selectedYear} matching "{searchRoom}".
+              </Text>
+            </View>
+          }
+          renderItem={({ item }) => {
+            const isPaid = item.status === "Paid";
+            return (
+              <View style={styles.tenantCard}>
+                <View style={styles.cardHeader}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: SPACING.sm,
+                    }}
+                  >
+                    <View style={styles.roomTag}>
+                      <Text style={styles.roomTagText}>ROOM {item.room}</Text>
+                    </View>
+
+                    {!isPaid && (
+                      <TouchableOpacity
+                        style={styles.remindIconBtn}
+                        onPress={() => {
+                          setWhatsappTarget(item);
+                          setCustomPhoneInput(item.phone || "");
+                        }}
+                      >
+                        <Text style={{ fontSize: 12 }}>💬</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
-                  {/* WhatsApp Reminder Icon -> Opens Contact Picker Modal */}
-                  {!isPaid && (
-                    <TouchableOpacity
-                      style={styles.remindIconBtn}
-                      onPress={() => {
-                        setWhatsappTarget(item);
-                        setCustomPhoneInput(item.phone || "");
-                      }}
-                    >
-                      <Text style={{ fontSize: 12 }}>💬</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                {/* Status Badge */}
-                <View
-                  style={[
-                    styles.statusBadge,
-                    isPaid ? styles.paidBadge : styles.dueBadge,
-                  ]}
-                >
                   <View
                     style={[
-                      styles.statusDot,
-                      isPaid ? styles.paidDot : styles.dueDot,
-                    ]}
-                  />
-                  <Text
-                    style={[
-                      styles.statusText,
-                      isPaid ? styles.paidText : styles.dueText,
+                      styles.statusBadge,
+                      isPaid ? styles.paidBadge : styles.dueBadge,
                     ]}
                   >
-                    {item.status}
-                  </Text>
+                    <View
+                      style={[
+                        styles.statusDot,
+                        isPaid ? styles.paidDot : styles.dueDot,
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.statusText,
+                        isPaid ? styles.paidText : styles.dueText,
+                      ]}
+                    >
+                      {item.status}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.cardBody}>
+                  <View>
+                    <Text style={styles.tenantName}>{item.tenant}</Text>
+                    <TouchableOpacity onPress={() => setHistoryTenant(item)}>
+                      <Text style={styles.historyLinkText}>View History ↗</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={{ alignItems: "flex-end" }}>
+                    <Text style={styles.amountText}>
+                      ₹{item.amount.toLocaleString()}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.manageBtn}
+                      onPress={() => setSelectedTenant(item)}
+                    >
+                      <Text style={styles.manageBtnText}>Action ›</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
+            );
+          }}
+        />
+      </View>
 
-              <View style={styles.cardBody}>
-                <View>
-                  <Text style={styles.tenantName}>{item.tenant}</Text>
-                  <TouchableOpacity onPress={() => setHistoryTenant(item)}>
-                    <Text style={styles.historyLinkText}>View History ↗</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text style={styles.amountText}>
-                    ₹{item.amount.toLocaleString()}
-                  </Text>
-                  {/* Action Button */}
-                  <TouchableOpacity
-                    style={styles.manageBtn}
-                    onPress={() => setSelectedTenant(item)}
-                  >
-                    <Text style={styles.manageBtnText}>Action ›</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          );
-        }}
-      />
-
-      {/* WhatsApp Contact Selector / Picker Modal */}
+      {/* Modals */}
+      {/* WhatsApp Contact Picker Modal */}
       <Modal
         visible={!!whatsappTarget}
         transparent
@@ -460,7 +476,9 @@ export default function RentManagement() {
           <View style={styles.modalBox}>
             <View style={styles.historyModalHeader}>
               <View>
-                <Text style={styles.modalHeaderTitle}>Select WhatsApp Contact</Text>
+                <Text style={styles.modalHeaderTitle}>
+                  Select WhatsApp Contact
+                </Text>
                 <Text style={styles.modalHeaderSub}>
                   {whatsappTarget?.tenant} • Room {whatsappTarget?.room}
                 </Text>
@@ -469,35 +487,59 @@ export default function RentManagement() {
                 style={styles.closeIconBtn}
                 onPress={() => setWhatsappTarget(null)}
               >
-                <Text style={{ color: COLORS.textPrimary, fontWeight: "700" }}>✕</Text>
+                <Text style={{ color: COLORS.textPrimary, fontWeight: "700" }}>
+                  ✕
+                </Text>
               </TouchableOpacity>
             </View>
 
-            {/* Registered Phone Option */}
             {whatsappTarget?.phone ? (
               <TouchableOpacity
                 style={styles.contactOptionRow}
-                onPress={() => executeWhatsAppSend(whatsappTarget.phone!, whatsappTarget)}
+                onPress={() =>
+                  executeWhatsAppSend(whatsappTarget.phone!, whatsappTarget)
+                }
               >
                 <View>
-                  <Text style={{ color: COLORS.textPrimary, fontWeight: "600", fontSize: 13 }}>
+                  <Text
+                    style={{
+                      color: COLORS.textPrimary,
+                      fontWeight: "600",
+                      fontSize: 13,
+                    }}
+                  >
                     Registered Contact
                   </Text>
-                  <Text style={{ color: COLORS.accent, fontSize: 13, marginTop: 2 }}>
+                  <Text
+                    style={{ color: COLORS.accent, fontSize: 13, marginTop: 2 }}
+                  >
                     +91 {whatsappTarget.phone}
                   </Text>
                 </View>
-                <Text style={{ color: COLORS.success, fontWeight: "700" }}>Send 💬</Text>
+                <Text style={{ color: COLORS.success, fontWeight: "700" }}>
+                  Send 💬
+                </Text>
               </TouchableOpacity>
             ) : (
-              <Text style={{ color: COLORS.textMuted, fontSize: 12, marginBottom: SPACING.md }}>
+              <Text
+                style={{
+                  color: COLORS.textMuted,
+                  fontSize: 12,
+                  marginBottom: SPACING.md,
+                }}
+              >
                 No registered phone number found on file.
               </Text>
             )}
 
-            {/* Custom Phone Number Input Option */}
             <View style={{ marginTop: SPACING.md }}>
-              <Text style={{ color: COLORS.textSecondary, fontSize: 12, marginBottom: SPACING.xs }}>
+              <Text
+                style={{
+                  color: COLORS.textSecondary,
+                  fontSize: 12,
+                  marginBottom: SPACING.xs,
+                }}
+              >
                 Or enter custom WhatsApp number:
               </Text>
               <View style={{ flexDirection: "row", gap: SPACING.sm }}>
@@ -510,8 +552,14 @@ export default function RentManagement() {
                   onChangeText={setCustomPhoneInput}
                 />
                 <TouchableOpacity
-                  style={[styles.bulkRemindBtn, { paddingHorizontal: SPACING.lg }]}
-                  onPress={() => whatsappTarget && executeWhatsAppSend(customPhoneInput, whatsappTarget)}
+                  style={[
+                    styles.bulkRemindBtn,
+                    { paddingHorizontal: SPACING.lg },
+                  ]}
+                  onPress={() =>
+                    whatsappTarget &&
+                    executeWhatsAppSend(customPhoneInput, whatsappTarget)
+                  }
                 >
                   <Text style={styles.bulkRemindText}>Send</Text>
                 </TouchableOpacity>
@@ -595,11 +643,16 @@ export default function RentManagement() {
                 style={styles.closeIconBtn}
                 onPress={() => setHistoryTenant(null)}
               >
-                <Text style={{ color: COLORS.textPrimary, fontWeight: "700" }}>✕</Text>
+                <Text style={{ color: COLORS.textPrimary, fontWeight: "700" }}>
+                  ✕
+                </Text>
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={{ maxHeight: 320 }}
+              showsVerticalScrollIndicator={false}
+            >
               {rents
                 .filter((r) => r.tenant === historyTenant?.tenant)
                 .map((record) => (
@@ -607,13 +660,24 @@ export default function RentManagement() {
                     <Text style={{ color: COLORS.textPrimary, fontSize: 13 }}>
                       {record.month} {record.year}
                     </Text>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: SPACING.md }}>
-                      <Text style={{ color: COLORS.textSecondary, fontSize: 13 }}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: SPACING.md,
+                      }}
+                    >
+                      <Text
+                        style={{ color: COLORS.textSecondary, fontSize: 13 }}
+                      >
                         ₹{record.amount.toLocaleString()}
                       </Text>
                       <Text
                         style={{
-                          color: record.status === "Paid" ? COLORS.successText : COLORS.warningText,
+                          color:
+                            record.status === "Paid"
+                              ? COLORS.successText
+                              : COLORS.warningText,
                           fontWeight: "700",
                           fontSize: 12,
                         }}
@@ -679,8 +743,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.sm,
+  },
+  contentWrapper: {
+    flex: 1,
+    paddingHorizontal: SPACING.lg, // Yeh ensure karega ki side se content chipke nahi
+    paddingTop: SPACING.md,
   },
   header: {
     flexDirection: "row",

@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { router } from "expo-router";
-import React, { useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   SafeAreaView,
@@ -21,9 +21,13 @@ interface ZoneInput {
   type: "AC" | "Non AC";
   bedsCount: string;
   rentPerBed: string;
+  existingBeds?: any[]; // To preserve tenant status if editing
 }
 
 export default function Add2BHKFlatScreen() {
+  const { flatId } = useLocalSearchParams<{ flatId?: string }>();
+  const isEditing = Boolean(flatId);
+
   const [flatNumber, setFlatNumber] = useState("101");
   const [apartmentName, setApartmentName] = useState("Roma Apartment");
 
@@ -37,15 +41,48 @@ export default function Add2BHKFlatScreen() {
     },
   ]);
 
+  // Load existing flat data if editing
+  useEffect(() => {
+    if (isEditing && flatId) {
+      loadFlatData(flatId);
+    }
+  }, [flatId]);
+
+  const loadFlatData = async (id: string) => {
+    try {
+      const existingData = await AsyncStorage.getItem("flats_2bhk");
+      if (existingData) {
+        const flats = JSON.parse(existingData);
+        const currentFlat = flats.find((f: any) => f.id === id);
+        if (currentFlat) {
+          setFlatNumber(currentFlat.flatNumber);
+          setApartmentName(currentFlat.apartmentName);
+
+          const loadedZones: ZoneInput[] = currentFlat.zones.map((z: any) => ({
+            id: z.id,
+            zoneName: z.zoneName,
+            type: z.type,
+            bedsCount: String(z.capacity || z.beds?.length || 1),
+            rentPerBed: String(z.rentPerBed || 0),
+            existingBeds: z.beds || [],
+          }));
+          setZones(loadedZones);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load flat for edit:", error);
+    }
+  };
+
   // Calculations for live summary
   const totalBeds = zones.reduce(
     (sum, z) => sum + (parseInt(z.bedsCount, 10) || 0),
-    0
+    0,
   );
   const totalPotentialRevenue = zones.reduce(
     (sum, z) =>
       sum + (parseInt(z.bedsCount, 10) || 0) * (parseFloat(z.rentPerBed) || 0),
-    0
+    0,
   );
 
   const handleAddZone = () => {
@@ -73,20 +110,28 @@ export default function Add2BHKFlatScreen() {
   const updateZoneField = (
     id: string,
     field: keyof ZoneInput,
-    value: string
+    value: string,
   ) => {
     setZones((prev) =>
-      prev.map((zone) => (zone.id === id ? { ...zone, [field]: value } : zone))
+      prev.map((zone) => (zone.id === id ? { ...zone, [field]: value } : zone)),
     );
   };
 
-  const generateBeds = (count: number) =>
-    Array.from({ length: count }, (_, i) => ({
-      id: `bed-${Date.now()}-${Math.random()}-${i}`,
-      bedNumber: `Bed ${i + 1}`,
-      isOccupied: false,
-      tenantName: "",
-    }));
+  const generateBeds = (count: number, existingBeds: any[] = []) => {
+    return Array.from({ length: count }, (_, i) => {
+      // Try to preserve existing bed info if index matches
+      const oldBed = existingBeds[i];
+      if (oldBed) {
+        return oldBed;
+      }
+      return {
+        id: `bed-${Date.now()}-${Math.random()}-${i}`,
+        bedNumber: `Bed ${i + 1}`,
+        status: "vacant",
+        tenantName: "",
+      };
+    });
+  };
 
   const handleSaveFlat = async () => {
     if (!flatNumber.trim()) {
@@ -104,42 +149,95 @@ export default function Add2BHKFlatScreen() {
         type: zone.type,
         capacity: count,
         rentPerBed: rent,
-        beds: generateBeds(count),
+        beds: generateBeds(count, zone.existingBeds),
       };
     });
 
-    const newFlat = {
-      id: `flat-${Date.now()}`,
-      flatNumber: flatNumber.trim(),
-      apartmentName: apartmentName.trim() || "Roma Apartment",
-      zones: formattedZones,
-    };
-
     try {
       const existingData = await AsyncStorage.getItem("flats_2bhk");
-      const flats = existingData ? JSON.parse(existingData) : [];
-      flats.push(newFlat);
+      let flats = existingData ? JSON.parse(existingData) : [];
+
+      if (isEditing) {
+        // Update existing flat
+        flats = flats.map((f: any) => {
+          if (f.id === flatId) {
+            return {
+              ...f,
+              flatNumber: flatNumber.trim(),
+              apartmentName: apartmentName.trim() || "Roma Apartment",
+              zones: formattedZones,
+            };
+          }
+          return f;
+        });
+        Alert.alert("Success", `Flat ${flatNumber} updated successfully.`);
+      } else {
+        // Create new flat
+        const newFlat = {
+          id: `flat-${Date.now()}`,
+          flatNumber: flatNumber.trim(),
+          apartmentName: apartmentName.trim() || "Roma Apartment",
+          zones: formattedZones,
+        };
+        flats.push(newFlat);
+        Alert.alert(
+          "Success",
+          `Flat ${flatNumber} created with ${totalBeds} total beds.`,
+        );
+      }
 
       await AsyncStorage.setItem("flats_2bhk", JSON.stringify(flats));
-      Alert.alert(
-        "Success",
-        `Flat ${flatNumber} created with ${totalBeds} total beds.`
-      );
       router.back();
     } catch (e) {
       Alert.alert("Error", "Failed to save flat details.");
     }
   };
 
+  const handleDeleteFlat = () => {
+    Alert.alert(
+      "Delete Flat",
+      `Are you sure you want to delete Flat ${flatNumber}? All its rooms and beds data will be removed permanently.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const existingData = await AsyncStorage.getItem("flats_2bhk");
+              if (existingData) {
+                let flats = JSON.parse(existingData);
+                flats = flats.filter((f: any) => f.id !== flatId);
+                await AsyncStorage.setItem("flats_2bhk", JSON.stringify(flats));
+                router.back();
+              }
+            } catch (error) {
+              Alert.alert("Error", "Failed to delete flat.");
+            }
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <SafeAreaView style={commonStyles.container}>
       {/* Top Header */}
       <View style={styles.topBar}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={22} color={COLORS.textSecondary} />
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <Ionicons
+            name="chevron-back"
+            size={22}
+            color={COLORS.textSecondary}
+          />
         </TouchableOpacity>
         <View>
-          <Text style={TYPOGRAPHY.headerTitle}>Add Property / Flat</Text>
+          <Text style={TYPOGRAPHY.headerTitle}>
+            {isEditing ? "Edit Property / Flat" : "Add Property / Flat"}
+          </Text>
           <Text style={{ color: COLORS.textMuted, fontSize: 12 }}>
             Configure layout & bed capacities
           </Text>
@@ -216,7 +314,11 @@ export default function Add2BHKFlatScreen() {
                   onPress={() => handleDeleteZone(zone.id)}
                   style={styles.deleteButton}
                 >
-                  <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+                  <Ionicons
+                    name="trash-outline"
+                    size={16}
+                    color={COLORS.danger}
+                  />
                   <Text style={{ color: COLORS.dangerText, fontSize: 12 }}>
                     Remove
                   </Text>
@@ -250,7 +352,11 @@ export default function Add2BHKFlatScreen() {
                 <Ionicons
                   name="flame-outline"
                   size={16}
-                  color={zone.type === "Non AC" ? COLORS.textWhite : COLORS.textSecondary}
+                  color={
+                    zone.type === "Non AC"
+                      ? COLORS.textWhite
+                      : COLORS.textSecondary
+                  }
                 />
                 <Text
                   style={[
@@ -275,7 +381,9 @@ export default function Add2BHKFlatScreen() {
                 <Ionicons
                   name="snow-outline"
                   size={16}
-                  color={zone.type === "AC" ? COLORS.textWhite : COLORS.textSecondary}
+                  color={
+                    zone.type === "AC" ? COLORS.textWhite : COLORS.textSecondary
+                  }
                 />
                 <Text
                   style={[
@@ -319,16 +427,46 @@ export default function Add2BHKFlatScreen() {
         {/* Add Zone Button */}
         <TouchableOpacity style={styles.addZoneButton} onPress={handleAddZone}>
           <Ionicons name="add-circle-outline" size={20} color={COLORS.accent} />
-          <Text style={{ color: COLORS.accent, fontWeight: "600", fontSize: 14 }}>
+          <Text
+            style={{ color: COLORS.accent, fontWeight: "600", fontSize: 14 }}
+          >
             Add Another Zone / Room
           </Text>
         </TouchableOpacity>
 
-        {/* Save Button */}
-        <TouchableOpacity style={commonStyles.primaryButton} onPress={handleSaveFlat}>
-          <Ionicons name="checkmark-circle-outline" size={20} color={COLORS.textWhite} />
-          <Text style={commonStyles.primaryButtonText}>Save Configuration</Text>
+        {/* Save / Update Button */}
+        <TouchableOpacity
+          style={commonStyles.primaryButton}
+          onPress={handleSaveFlat}
+        >
+          <Ionicons
+            name="checkmark-circle-outline"
+            size={20}
+            color={COLORS.textWhite}
+          />
+          <Text style={commonStyles.primaryButtonText}>
+            {isEditing ? "Update Configuration" : "Save Configuration"}
+          </Text>
         </TouchableOpacity>
+
+        {/* DELETE FLAT BUTTON (Only in Edit Mode) */}
+        {isEditing && (
+          <TouchableOpacity
+            style={styles.deleteFlatButton}
+            onPress={handleDeleteFlat}
+          >
+            <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
+            <Text
+              style={{
+                color: COLORS.dangerText,
+                fontWeight: "700",
+                fontSize: 14,
+              }}
+            >
+              Delete Entire Flat
+            </Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -419,7 +557,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.accent,
     borderStyle: "dashed",
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.md,
     backgroundColor: COLORS.accentBackground,
+  },
+  deleteFlatButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SPACING.sm,
+    paddingVertical: SPACING.md,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.danger,
+    backgroundColor: "rgba(239, 68, 68, 0.08)",
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.xl,
   },
 });
