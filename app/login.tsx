@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
+import { jwtDecode } from "jwt-decode"; // 👈 FIX 1: Named import fixed
 import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -28,57 +29,101 @@ export default function LoginScreen() {
 
   const passwordRef = useRef<TextInput>(null);
 
+  // -------------------------------------------------------------
+  // Validation Helper
+  // -------------------------------------------------------------
+  const validateForm = (): boolean => {
+    const trimmedUsername = username.trim();
+
+    if (!trimmedUsername) {
+      setError("Please enter your username.");
+      return false;
+    }
+
+    if (!password) {
+      setError("Please enter your password.");
+      return false;
+    }
+
+    return true;
+  };
+
+  // -------------------------------------------------------------
+  // Login Action
+  // -------------------------------------------------------------
   const handleLogin = async () => {
     setError("");
 
-    if (!username.trim()) {
-      setError("Please enter username");
-      return;
-    }
-    if (!password.trim()) {
-      setError("Please enter password");
-      return;
-    }
+    // 1. Front-end Validation Check
+    if (!validateForm()) return;
 
     setLoading(true);
 
     try {
-      // 1. Try hitting the API (with a safety timeout so it doesn't hang)
-      const response = await api.post(
-        "/User/login",
-        {
-          name: username.trim(),
-          password: password,
-        },
-        { timeout: 3000 }, // 3 second max wait
-      );
+      // 2. Call API
+      const response = await api.post("/User/login", {
+        name: username.trim(),
+        password: password,
+      });
 
-      if (response?.data?.token) {
-        await AsyncStorage.setItem("token", response.data.token);
+      // 3. Extract Token & Data
+      const token = response?.data?.token;
+
+      if (token) {
+        // Decode Token to find user role
+        const decoded: any = jwtDecode(token);
+
+        // Backend claims me role field check karein (Default to "Admin" or "Tenant")
+        const userRole =
+          decoded.role ??
+          decoded[
+            "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
+          ] ??
+          "";
+
+        // Multi-save in AsyncStorage
+        await Promise.all([
+          AsyncStorage.setItem("token", token),
+          AsyncStorage.setItem("isLoggedIn", "true"),
+          AsyncStorage.setItem("userRole", userRole),
+        ]);
+        console.log("Login Error:", userRole);
+        // 🚦 ROLE BASED ROUTING 🚦
+        // 👈 FIX 2: Added 'as any' casting to prevent Expo Router type issues
+        if (userRole === "Admin" || userRole === "Manager") {
+          router.replace("/(tabs)" as any);
+        } else if (userRole === "User") {
+          router.replace("/(tenant)" as any);
+        } else {
+          router.replace("/(tabs)" as any);
+        }
+      } else {
+        setError("Invalid response from server. Token missing.");
       }
-    } catch (err) {
-      console.warn(
-        "API request failed or timed out. Continuing with offline mode...",
-        err,
-      );
+    } catch (err: any) {
+      // Production Error Handling Strategy
+      if (err.response) {
+        const status = err.response.status;
+        const serverMessage = err.response.data?.message;
+
+        if (status === 401 || status === 400) {
+          setError(serverMessage || "Invalid username or password.");
+        } else if (status >= 500) {
+          setError("Server is temporarily down. Please try again later.");
+        } else {
+          setError(serverMessage || "An error occurred during login.");
+        }
+      } else if (err.request) {
+        setError("Network error. Please check your internet connection.");
+      } else {
+        setError("Something went wrong. Please try again.");
+      }
     } finally {
-      try {
-        // 2. Always persist login state regardless of API success/failure
-        await AsyncStorage.setItem("isLoggedIn", "true");
-
-        // 3. Reset loading before navigating
-        setLoading(false);
-
-        // 4. Navigate directly to tabs
-        router.replace("/(tabs)");
-      } catch (storageErr) {
-        console.error("AsyncStorage error:", storageErr);
-        setLoading(false);
-        setError("Failed to save login state");
-      }
+      setLoading(false);
     }
   };
 
+  // Quick helper for Demo / Staging environment
   const handleDemoFill = () => {
     setUsername("kunal");
     setPassword("123456");
@@ -91,7 +136,7 @@ export default function LoginScreen() {
 
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
+        style={styles.keyboardView}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -115,7 +160,7 @@ export default function LoginScreen() {
             <Text style={styles.welcome}>Welcome Back 👋</Text>
             <Text style={styles.cardSub}>Sign in to continue</Text>
 
-            {/* Username */}
+            {/* Username Input */}
             <Text style={styles.label}>Username</Text>
             <View
               style={[
@@ -132,17 +177,21 @@ export default function LoginScreen() {
                 placeholder="e.g. kunal_admin"
                 placeholderTextColor="#94A3B8"
                 value={username}
-                onChangeText={setUsername}
+                onChangeText={(text) => {
+                  setUsername(text);
+                  if (error) setError("");
+                }}
                 onFocus={() => setFocusedInput("username")}
                 onBlur={() => setFocusedInput(null)}
                 autoCapitalize="none"
+                autoCorrect={false}
                 style={styles.input}
                 returnKeyType="next"
                 onSubmitEditing={() => passwordRef.current?.focus()}
               />
             </View>
 
-            {/* Password */}
+            {/* Password Input */}
             <Text style={styles.label}>Password</Text>
             <View
               style={[
@@ -161,7 +210,10 @@ export default function LoginScreen() {
                 placeholderTextColor="#94A3B8"
                 secureTextEntry={!showPassword}
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(text) => {
+                  setPassword(text);
+                  if (error) setError("");
+                }}
                 onFocus={() => setFocusedInput("password")}
                 onBlur={() => setFocusedInput(null)}
                 style={styles.input}
@@ -180,7 +232,7 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Error Message */}
+            {/* Error Notification */}
             {error ? (
               <View style={styles.errorBox}>
                 <Ionicons
@@ -192,7 +244,7 @@ export default function LoginScreen() {
               </View>
             ) : null}
 
-            {/* Login Button */}
+            {/* Submit Button */}
             <TouchableOpacity
               style={[styles.loginButton, loading && styles.buttonDisabled]}
               onPress={handleLogin}
@@ -206,18 +258,21 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Clickable Demo Auto-fill */}
-            <TouchableOpacity
-              style={styles.demoBox}
-              onPress={handleDemoFill}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="flash-outline" size={16} color="#2563EB" />
-              <Text style={styles.demoText}>
-                Demo Login: <Text style={styles.demoBold}>kunal / 123456</Text>{" "}
-                (Tap to fill)
-              </Text>
-            </TouchableOpacity>
+            {/* Demo Helper Button */}
+            {__DEV__ && (
+              <TouchableOpacity
+                style={styles.demoBox}
+                onPress={handleDemoFill}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="flash-outline" size={16} color="#2563EB" />
+                <Text style={styles.demoText}>
+                  Demo Login:{" "}
+                  <Text style={styles.demoBold}>kunal / 123456</Text> (Tap to
+                  fill)
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <Text style={styles.footer}>PG Management System v1.0</Text>
           </View>
@@ -231,6 +286,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#0F172A",
+  },
+  keyboardView: {
+    flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
