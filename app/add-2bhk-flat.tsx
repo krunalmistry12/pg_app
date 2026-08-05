@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   SafeAreaView,
   ScrollView,
@@ -13,7 +13,14 @@ import {
   View,
 } from "react-native";
 import { COLORS, RADIUS, SPACING, TYPOGRAPHY } from "../src/constants/theme";
+import {
+  createFlatApi,
+  deleteFlatApi,
+  getFlatByIdApi,
+  updateFlatApi,
+} from "../src/services/apiService";
 import { commonStyles } from "../src/styles/commonStyles";
+import { BedStatus, CreateFlatDto, ZoneType } from "../src/types/pgManagement";
 
 interface ZoneInput {
   id: string;
@@ -21,7 +28,7 @@ interface ZoneInput {
   type: "AC" | "Non AC";
   bedsCount: string;
   rentPerBed: string;
-  existingBeds?: any[]; // To preserve tenant status if editing
+  existingBeds?: any[];
 }
 
 export default function Add2BHKFlatScreen() {
@@ -30,6 +37,7 @@ export default function Add2BHKFlatScreen() {
 
   const [flatNumber, setFlatNumber] = useState("101");
   const [apartmentName, setApartmentName] = useState("Roma Apartment");
+  const [loading, setLoading] = useState<boolean>(false);
 
   const [zones, setZones] = useState<ZoneInput[]>([
     {
@@ -41,7 +49,7 @@ export default function Add2BHKFlatScreen() {
     },
   ]);
 
-  // Load existing flat data if editing
+  // Load existing flat data from API if editing
   useEffect(() => {
     if (isEditing && flatId) {
       loadFlatData(flatId);
@@ -49,28 +57,31 @@ export default function Add2BHKFlatScreen() {
   }, [flatId]);
 
   const loadFlatData = async (id: string) => {
+    setLoading(true);
     try {
-      const existingData = await AsyncStorage.getItem("flats_2bhk");
-      if (existingData) {
-        const flats = JSON.parse(existingData);
-        const currentFlat = flats.find((f: any) => f.id === id);
-        if (currentFlat) {
-          setFlatNumber(currentFlat.flatNumber);
-          setApartmentName(currentFlat.apartmentName);
+      const response = await getFlatByIdApi(id);
+      if (response.success && response.data) {
+        const currentFlat = response.data;
+        setFlatNumber(currentFlat.flatNumber);
+        setApartmentName(currentFlat.apartmentName);
 
-          const loadedZones: ZoneInput[] = currentFlat.zones.map((z: any) => ({
-            id: z.id,
-            zoneName: z.zoneName,
-            type: z.type,
-            bedsCount: String(z.capacity || z.beds?.length || 1),
-            rentPerBed: String(z.rentPerBed || 0),
-            existingBeds: z.beds || [],
-          }));
-          setZones(loadedZones);
-        }
+        const loadedZones: ZoneInput[] = currentFlat.zones.map((z: any) => ({
+          id: z.id || `z-${Math.random()}`,
+          zoneName: z.zoneName,
+          type: z.type === ZoneType.AC ? "AC" : "Non AC",
+          bedsCount: String(z.capacity || z.beds?.length || 1),
+          rentPerBed: String(z.rentPerBed || 0),
+          existingBeds: z.beds || [],
+        }));
+        setZones(loadedZones);
       }
-    } catch (error) {
-      console.error("Failed to load flat for edit:", error);
+    } catch (error: any) {
+      Alert.alert(
+        "Error",
+        error.response?.data?.message || "Failed to load flat details.",
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -119,16 +130,11 @@ export default function Add2BHKFlatScreen() {
 
   const generateBeds = (count: number, existingBeds: any[] = []) => {
     return Array.from({ length: count }, (_, i) => {
-      // Try to preserve existing bed info if index matches
       const oldBed = existingBeds[i];
-      if (oldBed) {
-        return oldBed;
-      }
       return {
-        id: `bed-${Date.now()}-${Math.random()}-${i}`,
-        bedNumber: `Bed ${i + 1}`,
-        status: "vacant",
-        tenantName: "",
+        bedNumber: oldBed?.bedNumber || `Bed ${i + 1}`,
+        status: oldBed?.status || BedStatus.Vacant,
+        tenantName: oldBed?.tenantName || "",
       };
     });
   };
@@ -139,57 +145,45 @@ export default function Add2BHKFlatScreen() {
       return;
     }
 
-    const formattedZones = zones.map((zone) => {
-      const count = Math.max(1, Number(zone.bedsCount) || 1);
-      const rent = Math.max(0, Number(zone.rentPerBed) || 0);
+    // Convert to API Request Payload
+    const payload: CreateFlatDto = {
+      flatNumber: flatNumber.trim(),
+      apartmentName: apartmentName.trim() || "Roma Apartment",
+      userId: "3fa85f64-5717-4562-b3fc-2c963f66afa6", // Replace with Logged-In Owner's UserId
+      zones: zones.map((zone) => {
+        const count = Math.max(1, Number(zone.bedsCount) || 1);
+        const rent = Math.max(0, Number(zone.rentPerBed) || 0);
 
-      return {
-        id: zone.id,
-        zoneName: zone.zoneName.trim() || "Zone",
-        type: zone.type,
-        capacity: count,
-        rentPerBed: rent,
-        beds: generateBeds(count, zone.existingBeds),
-      };
-    });
+        return {
+          zoneName: zone.zoneName.trim() || "Zone",
+          type: zone.type === "AC" ? ZoneType.AC : ZoneType.NonAC,
+          capacity: count,
+          rentPerBed: rent,
+          beds: generateBeds(count, zone.existingBeds),
+        };
+      }),
+    };
 
+    setLoading(true);
     try {
-      const existingData = await AsyncStorage.getItem("flats_2bhk");
-      let flats = existingData ? JSON.parse(existingData) : [];
-
-      if (isEditing) {
-        // Update existing flat
-        flats = flats.map((f: any) => {
-          if (f.id === flatId) {
-            return {
-              ...f,
-              flatNumber: flatNumber.trim(),
-              apartmentName: apartmentName.trim() || "Roma Apartment",
-              zones: formattedZones,
-            };
-          }
-          return f;
-        });
+      if (isEditing && flatId) {
+        await updateFlatApi(flatId, payload);
         Alert.alert("Success", `Flat ${flatNumber} updated successfully.`);
       } else {
-        // Create new flat
-        const newFlat = {
-          id: `flat-${Date.now()}`,
-          flatNumber: flatNumber.trim(),
-          apartmentName: apartmentName.trim() || "Roma Apartment",
-          zones: formattedZones,
-        };
-        flats.push(newFlat);
+        await createFlatApi(payload);
         Alert.alert(
           "Success",
           `Flat ${flatNumber} created with ${totalBeds} total beds.`,
         );
       }
-
-      await AsyncStorage.setItem("flats_2bhk", JSON.stringify(flats));
       router.back();
-    } catch (e) {
-      Alert.alert("Error", "Failed to save flat details.");
+    } catch (e: any) {
+      Alert.alert(
+        "Error",
+        e.response?.data?.message || "Failed to save flat details.",
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -203,16 +197,19 @@ export default function Add2BHKFlatScreen() {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
+            if (!flatId) return;
+            setLoading(true);
             try {
-              const existingData = await AsyncStorage.getItem("flats_2bhk");
-              if (existingData) {
-                let flats = JSON.parse(existingData);
-                flats = flats.filter((f: any) => f.id !== flatId);
-                await AsyncStorage.setItem("flats_2bhk", JSON.stringify(flats));
-                router.back();
-              }
-            } catch (error) {
-              Alert.alert("Error", "Failed to delete flat.");
+              await deleteFlatApi(flatId);
+              Alert.alert("Deleted", "Flat removed successfully.");
+              router.back();
+            } catch (error: any) {
+              Alert.alert(
+                "Error",
+                error.response?.data?.message || "Failed to delete flat.",
+              );
+            } finally {
+              setLoading(false);
             }
           },
         },
@@ -436,17 +433,24 @@ export default function Add2BHKFlatScreen() {
 
         {/* Save / Update Button */}
         <TouchableOpacity
-          style={commonStyles.primaryButton}
+          style={[commonStyles.primaryButton, loading && { opacity: 0.7 }]}
           onPress={handleSaveFlat}
+          disabled={loading}
         >
-          <Ionicons
-            name="checkmark-circle-outline"
-            size={20}
-            color={COLORS.textWhite}
-          />
-          <Text style={commonStyles.primaryButtonText}>
-            {isEditing ? "Update Configuration" : "Save Configuration"}
-          </Text>
+          {loading ? (
+            <ActivityIndicator color={COLORS.textWhite} />
+          ) : (
+            <>
+              <Ionicons
+                name="checkmark-circle-outline"
+                size={20}
+                color={COLORS.textWhite}
+              />
+              <Text style={commonStyles.primaryButtonText}>
+                {isEditing ? "Update Configuration" : "Save Configuration"}
+              </Text>
+            </>
+          )}
         </TouchableOpacity>
 
         {/* DELETE FLAT BUTTON (Only in Edit Mode) */}
@@ -472,7 +476,6 @@ export default function Add2BHKFlatScreen() {
   );
 }
 
-// Local UI specific styles
 const styles = StyleSheet.create({
   topBar: {
     flexDirection: "row",
