@@ -80,12 +80,21 @@ export default function LoginScreen() {
             "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
           ] ??
           "";
-
+        const userId =
+          decoded.id ??
+          decoded.userId ??
+          decoded.sub ??
+          decoded[
+            "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
+          ] ??
+          response?.data?.user?.id ?? // Direct response object me agar user.id ho
+          "";
         // Multi-save in AsyncStorage
         await Promise.all([
           AsyncStorage.setItem("token", token),
           AsyncStorage.setItem("isLoggedIn", "true"),
           AsyncStorage.setItem("userRole", userRole),
+          AsyncStorage.setItem("userId", userId),
         ]);
         console.log("Login Error:", userRole);
         // 🚦 ROLE BASED ROUTING 🚦
@@ -101,7 +110,12 @@ export default function LoginScreen() {
         setError("Invalid response from server. Token missing.");
       }
     } catch (err: any) {
-      // Production Error Handling Strategy
+      // 🔍 EXACT ERROR LOG KARNE KE LIYE YAHAN CONSOLE LAGAEYIN
+      console.log("=== LOGIN ERROR DETAILS ===");
+      console.log("Error Message:", err.message);
+      console.log("Error Response:", err.response?.data);
+      console.log("Error Status:", err.response?.status);
+
       if (err.response) {
         const status = err.response.status;
         const serverMessage = err.response.data?.message;
@@ -114,7 +128,9 @@ export default function LoginScreen() {
           setError(serverMessage || "An error occurred during login.");
         }
       } else if (err.request) {
-        setError("Network error. Please check your internet connection.");
+        setError(
+          "Network error. Server tak request nahi pahunch rahi. Check Ngrok URL.",
+        );
       } else {
         setError("Something went wrong. Please try again.");
       }

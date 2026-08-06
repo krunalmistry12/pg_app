@@ -1,89 +1,26 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import axios from "axios";
-import {
-  AuthResponse,
-  CreateFlatDto,
-  CreateUserDto,
-  LoginDto,
-  UserResponseDto,
-} from "../types/pgManagement";
+import { CreateFlatDto } from "../types/pgManagement";
+import api from "./api";
 
-// Backend Base URL
-const API_BASE_URL = "https://ac18-43-241-144-62.ngrok-free.app/api";
-
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
-    // Ngrok ke HTML warning page ko bypass karne ke liye header:
-    "ngrok-skip-browser-warning": "69420",
-  },
-});
-
-// Interceptor: Async storage se Bearer Token attach karne ke liye
-apiClient.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("token");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error reading token from AsyncStorage:", error);
-    }
-    return config;
-  },
-  (error) => Promise.reject(error),
-);
-
-// ==========================================
-// USER & AUTH SERVICES
-// ==========================================
-export const registerUser = async (
-  data: CreateUserDto,
-): Promise<AuthResponse> => {
-  const response = await apiClient.post<AuthResponse>("/users/register", data);
-  return response.data;
-};
-
-export const loginUser = async (data: LoginDto): Promise<AuthResponse> => {
-  const response = await apiClient.post<AuthResponse>("/users/login", data);
-  if (response.data.token) {
-    // React Native AsyncStorage method:
-    await AsyncStorage.setItem("token", response.data.token);
-  }
-  return response.data;
-};
-
-export const getAllUsers = async (): Promise<UserResponseDto[]> => {
-  const response = await apiClient.get<{
-    success: boolean;
-    data: UserResponseDto[];
-  }>("/users");
-  return response.data.data;
-};
-
-// ==========================================
-// FLAT MANAGEMENT SERVICES
-// ==========================================
+// 🟢 1. Create Flat with Rooms/Zones
 export const createFlatApi = async (payload: CreateFlatDto) => {
-  const response = await apiClient.post("/flats", payload);
+  const response = await api.post("/Flats", payload);
   return response.data;
 };
 
-export const getFlatByIdApi = async (flatId: string) => {
-  const response = await apiClient.get(`/flats/${flatId}`);
+// 🟡 2. Update Flat & Rooms (Room Add/Edit karne ke liye)
+export const updateFlatApi = async (id: string, payload: CreateFlatDto) => {
+  const response = await api.put(`/Flats/${id}`, payload);
   return response.data;
 };
 
-export const updateFlatApi = async (flatId: string, payload: CreateFlatDto) => {
-  const response = await apiClient.put(`/flats/${flatId}`, payload);
+// 🔵 3. Get Flat Details by ID
+export const getFlatByIdApi = async (id: string) => {
+  const response = await api.get(`/Flats/${id}`);
   return response.data;
 };
 
-export const deleteFlatApi = async (flatId: string) => {
-  const response = await apiClient.delete(`/flats/${flatId}`);
+// 🔴 4. Delete Flat
+export const deleteFlatApi = async (id: string) => {
+  const response = await api.delete(`/Flats/${id}`);
   return response.data;
 };
-
-export default apiClient;

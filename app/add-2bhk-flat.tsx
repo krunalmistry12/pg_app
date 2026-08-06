@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -20,7 +21,6 @@ import {
   updateFlatApi,
 } from "../src/services/apiService";
 import { commonStyles } from "../src/styles/commonStyles";
-import { BedStatus, CreateFlatDto, ZoneType } from "../src/types/pgManagement";
 
 interface ZoneInput {
   id: string;
@@ -38,6 +38,9 @@ export default function Add2BHKFlatScreen() {
   const [flatNumber, setFlatNumber] = useState("101");
   const [apartmentName, setApartmentName] = useState("Roma Apartment");
   const [loading, setLoading] = useState<boolean>(false);
+  const [currentUserId, setCurrentUserId] = useState<string>(
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  );
 
   const [zones, setZones] = useState<ZoneInput[]>([
     {
@@ -49,37 +52,64 @@ export default function Add2BHKFlatScreen() {
     },
   ]);
 
-  // Load existing flat data from API if editing
+  // Fetch logged-in UserId and Load flat data if editing
   useEffect(() => {
-    if (isEditing && flatId) {
-      loadFlatData(flatId);
-    }
+    const initScreen = async () => {
+      try {
+        const savedUserId = await AsyncStorage.getItem("userId");
+        if (savedUserId) {
+          setCurrentUserId(savedUserId);
+        }
+      } catch (e) {
+        console.log("Could not load userId from storage", e);
+      }
+
+      if (isEditing && flatId) {
+        loadFlatData(flatId);
+      }
+    };
+
+    initScreen();
   }, [flatId]);
 
+  // 🔵 GET API Call - Fetch Flat & Rooms Details
   const loadFlatData = async (id: string) => {
     setLoading(true);
     try {
       const response = await getFlatByIdApi(id);
-      if (response.success && response.data) {
-        const currentFlat = response.data;
-        setFlatNumber(currentFlat.flatNumber);
-        setApartmentName(currentFlat.apartmentName);
 
-        const loadedZones: ZoneInput[] = currentFlat.zones.map((z: any) => ({
-          id: z.id || `z-${Math.random()}`,
-          zoneName: z.zoneName,
-          type: z.type === ZoneType.AC ? "AC" : "Non AC",
-          bedsCount: String(z.capacity || z.beds?.length || 1),
-          rentPerBed: String(z.rentPerBed || 0),
-          existingBeds: z.beds || [],
-        }));
-        setZones(loadedZones);
+      const flatData = response.data?.data || response.data;
+
+      if (flatData) {
+        // 2. Flat level fields set karein
+        setFlatNumber(flatData.flatNumber || "");
+        setApartmentName(flatData.apartmentName || "");
+
+        // 3. Zones aur Beds ko form ke state ke format me convert karke set karein
+        if (flatData.zones && flatData.zones.length > 0) {
+          const formattedZones = flatData.zones.map((zone: any) => {
+            const bedCount = zone.capacity || zone.beds?.length || 1;
+            // Individual bed rent ya room rent calculate karein
+            const bedRentVal =
+              zone.beds?.[0]?.bedRent ||
+              zone.beds?.[0]?.rent ||
+              (zone.roomRent ? zone.roomRent / bedCount : 0);
+
+            return {
+              id: zone.id || zone.zoneId,
+              zoneName: zone.zoneName || "",
+              type: zone.type === 1 || zone.type === "AC" ? "AC" : "Non AC",
+              bedsCount: bedCount.toString(),
+              rentPerBed: bedRentVal.toString(), // 👈 Yeh input field me dikhega
+              beds: zone.beds || [],
+            };
+          });
+          setZones(formattedZones);
+        }
       }
-    } catch (error: any) {
-      Alert.alert(
-        "Error",
-        error.response?.data?.message || "Failed to load flat details.",
-      );
+    } catch (error) {
+      console.log("Error loading flat for edit:", error);
+      Alert.alert("Error", "Could not load flat details for editing.");
     } finally {
       setLoading(false);
     }
@@ -128,38 +158,67 @@ export default function Add2BHKFlatScreen() {
     );
   };
 
-  const generateBeds = (count: number, existingBeds: any[] = []) => {
+  const generateBeds = (
+    count: number,
+    existingBeds: any[] = [],
+    rentPerBed: number, // 👈 Yeh ab '30' hai
+  ) => {
     return Array.from({ length: count }, (_, i) => {
-      const oldBed = existingBeds[i];
+      const oldBed = existingBeds && existingBeds[i] ? existingBeds[i] : null;
+
       return {
+        id: oldBed?.id || oldBed?.bedId || null,
+        bedId: oldBed?.id || oldBed?.bedId || null,
         bedNumber: oldBed?.bedNumber || `Bed ${i + 1}`,
-        status: oldBed?.status || BedStatus.Vacant,
+        status: oldBed?.status ?? 1,
         tenantName: oldBed?.tenantName || "",
+
+        // 🔴 Individual Bed Rent = 30
+        bedRent: rentPerBed,
+        rent: rentPerBed,
       };
     });
   };
 
+  // 🟢 POST / PUT API Call - Save Flat & Rooms
   const handleSaveFlat = async () => {
     if (!flatNumber.trim()) {
       Alert.alert("Error", "Please enter flat number.");
       return;
     }
 
-    // Convert to API Request Payload
-    const payload: CreateFlatDto = {
+    // API Payload construct karna
+    const payload: any = {
       flatNumber: flatNumber.trim(),
       apartmentName: apartmentName.trim() || "Roma Apartment",
-      userId: "3fa85f64-5717-4562-b3fc-2c963f66afa6", // Replace with Logged-In Owner's UserId
-      zones: zones.map((zone) => {
-        const count = Math.max(1, Number(zone.bedsCount) || 1);
-        const rent = Math.max(0, Number(zone.rentPerBed) || 0);
+      pricingType: "BED_WISE", // Ya jo aapki pricingType state hai
+      userId: currentUserId,
+      zones: zones.map((zone: any) => {
+        // 1. Bed count nikalen
+        const count = Math.max(
+          1,
+          Number(zone.bedsCount) || zone.beds?.length || 1,
+        );
+
+        // 2. Rent Per Bed (Aapne 30 enter kiya)
+        const rentPerBed = Math.max(0, Number(zone.rentPerBed) || 0);
+
+        // 3. Room/Zone Total Rent = Rent Per Bed * Number of Beds
+        const totalRoomRent = rentPerBed * count;
 
         return {
+          id: zone.id || zone.zoneId || null,
+          zoneId: zone.id || zone.zoneId || null,
           zoneName: zone.zoneName.trim() || "Zone",
-          type: zone.type === "AC" ? ZoneType.AC : ZoneType.NonAC,
+          type: zone.type === "AC" || zone.type === 1 ? 1 : 2,
           capacity: count,
-          rentPerBed: rent,
-          beds: generateBeds(count, zone.existingBeds),
+
+          // 🔴 Room Rent me Total bhejein
+          roomRent: totalRoomRent,
+          rent: totalRoomRent,
+
+          // 🔴 Bed Rent me individual 30 bhejein
+          beds: generateBeds(count, zone.beds || zone.existingBeds, rentPerBed),
         };
       }),
     };
@@ -167,9 +226,18 @@ export default function Add2BHKFlatScreen() {
     setLoading(true);
     try {
       if (isEditing && flatId) {
+        console.log("==========================================");
+        console.log(
+          "🚀 FRONTEND SE BHEJA JA RAHA PAYLOAD:",
+          JSON.stringify(payload, null, 2),
+        );
+        console.log("==========================================");
+        // 🟡 PUT API Call
         await updateFlatApi(flatId, payload);
+
         Alert.alert("Success", `Flat ${flatNumber} updated successfully.`);
       } else {
+        // 🟢 POST API Call
         await createFlatApi(payload);
         Alert.alert(
           "Success",
@@ -178,6 +246,7 @@ export default function Add2BHKFlatScreen() {
       }
       router.back();
     } catch (e: any) {
+      console.log("SAVE ERROR:", e.response?.data || e.message);
       Alert.alert(
         "Error",
         e.response?.data?.message || "Failed to save flat details.",
@@ -187,6 +256,7 @@ export default function Add2BHKFlatScreen() {
     }
   };
 
+  // 🔴 DELETE API Call
   const handleDeleteFlat = () => {
     Alert.alert(
       "Delete Flat",
@@ -458,6 +528,7 @@ export default function Add2BHKFlatScreen() {
           <TouchableOpacity
             style={styles.deleteFlatButton}
             onPress={handleDeleteFlat}
+            disabled={loading}
           >
             <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
             <Text

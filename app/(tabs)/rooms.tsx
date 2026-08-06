@@ -8,9 +8,11 @@ import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   ListRenderItem,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,6 +22,7 @@ import {
 } from "react-native";
 
 import { COLORS, RADIUS, SPACING, TYPOGRAPHY } from "@/src/constants/theme";
+import api from "@/src/services/api";
 
 // --- Types & Interfaces ---
 export type BedStatus = "vacant" | "occupied" | "reserved" | "maintenance";
@@ -84,7 +87,7 @@ const getStatusColor = (status: BedStatus) => {
   }
 };
 
-// --- Sub-Component: Inline Flat Card ---
+// --- Sub-Component: Enhanced Flat Card ---
 interface FlatCardProps {
   flat: Flat;
   onDelete: (flatId: string, flatNumber: string) => void;
@@ -100,15 +103,17 @@ const FlatCard: React.FC<FlatCardProps> = React.memo(
     let totalEarning = 0;
     let maxEarning = 0;
 
-    flat.zones.forEach((z) => {
+    flat.zones?.forEach((z) => {
+      const capacity = z.capacity || z.beds?.length || 0;
       const occupiedInZone =
         z.beds?.filter(
           (b) => b.status === "occupied" || b.status === "reserved",
         ).length || 0;
-      totalCapacity += z.capacity;
+
+      totalCapacity += capacity;
       totalOccupied += occupiedInZone;
-      totalEarning += occupiedInZone * z.rentPerBed;
-      maxEarning += z.capacity * z.rentPerBed;
+      totalEarning += occupiedInZone * (z.rentPerBed || 0);
+      maxEarning += capacity * (z.rentPerBed || 0);
     });
 
     const availableBeds = totalCapacity - totalOccupied;
@@ -122,7 +127,8 @@ const FlatCard: React.FC<FlatCardProps> = React.memo(
           <View>
             <Text style={styles.flatNo}>Flat {flat.flatNumber}</Text>
             <Text style={styles.subText}>
-              {flat.apartmentName} • {flat.zones.length} Zones
+              {flat.apartmentName || "Apartment"} • {flat.zones?.length || 0}{" "}
+              Zones
             </Text>
           </View>
 
@@ -149,7 +155,7 @@ const FlatCard: React.FC<FlatCardProps> = React.memo(
                   },
                 ]}
               >
-                {availableBeds > 0 ? `${availableBeds} Vacant` : "Full"}
+                {availableBeds > 0 ? `${availableBeds} Vacant Beds` : "Full"}
               </Text>
             </View>
 
@@ -163,37 +169,53 @@ const FlatCard: React.FC<FlatCardProps> = React.memo(
             </TouchableOpacity>
 
             {/* Delete Button */}
+            <TouchableOpacity
+              onPress={() => onDelete(flat.id, flat.flatNumber)}
+              style={styles.actionIconButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Progress Bar & Financial Snapshot */}
+        {/* Occupancy Progress Bar */}
         <View style={styles.progressContainer}>
           <View
             style={[styles.progressBar, { width: `${occupancyPercent}%` }]}
           />
         </View>
 
+        {/* Financial & Summary Row */}
         <View style={styles.revenueRow}>
-          <Text style={styles.revenueText}>
-            Revenue:{" "}
+          <View>
+            <Text style={styles.revenueLabel}>Est. Flat Revenue</Text>
             <Text style={styles.revenueHighlight}>
-              ₹{totalEarning.toLocaleString()}
-            </Text>{" "}
-            / ₹{maxEarning.toLocaleString()}
-          </Text>
-          <Text style={styles.occupancyRateText}>
-            {Math.round(occupancyPercent)}% Occupied
-          </Text>
+              ₹{totalEarning.toLocaleString()}{" "}
+              <Text style={styles.maxRevenue}>
+                / ₹{maxEarning.toLocaleString()}
+              </Text>
+            </Text>
+          </View>
+          <View style={{ alignItems: "flex-end" }}>
+            <Text style={styles.revenueLabel}>Occupancy</Text>
+            <Text style={styles.occupancyRateText}>
+              {Math.round(occupancyPercent)}% ({totalOccupied}/{totalCapacity}{" "}
+              Beds)
+            </Text>
+          </View>
         </View>
 
-        {/* Zones & Mini Inline Bed Grids */}
+        {/* Zone Wise Bed View List */}
         <View style={styles.zonesList}>
-          {flat.zones.map((zone) => {
+          {flat.zones?.map((zone) => {
             const occupiedInZone =
               zone.beds?.filter(
                 (b) => b.status === "occupied" || b.status === "reserved",
               ).length || 0;
             const isAc = zone.type === "AC";
+            const zoneVacant =
+              (zone.capacity || zone.beds?.length || 0) - occupiedInZone;
 
             return (
               <View key={zone.id} style={styles.zoneBox}>
@@ -201,10 +223,10 @@ const FlatCard: React.FC<FlatCardProps> = React.memo(
                   <View style={styles.zoneTitleRow}>
                     <Ionicons
                       name={isAc ? "snow-outline" : "bed-outline"}
-                      size={15}
+                      size={16}
                       color={isAc ? COLORS.accent : COLORS.textSecondary}
                     />
-                    <Text style={TYPOGRAPHY.sectionTitle}>{zone.zoneName}</Text>
+                    <Text style={styles.zoneTitleText}>{zone.zoneName}</Text>
                     <Text style={styles.zoneSubMeta}>
                       • ₹{zone.rentPerBed}/mo
                     </Text>
@@ -215,33 +237,49 @@ const FlatCard: React.FC<FlatCardProps> = React.memo(
                     onPress={() => onOpenZone(flat.id, zone)}
                   >
                     <Text style={styles.expandBtnText}>
-                      {occupiedInZone}/{zone.capacity} Beds
+                      {zoneVacant > 0 ? `${zoneVacant} Vacant` : "Full"}
                     </Text>
                     <Ionicons
                       name="chevron-forward"
-                      size={12}
+                      size={14}
                       color={COLORS.accent}
                     />
                   </TouchableOpacity>
                 </View>
 
-                {/* Inline Bed Indicators */}
+                {/* Inline Zone Beds Matrix (Shows All Beds in Card) */}
                 <View style={styles.inlineBedGrid}>
-                  {zone.beds.length > 6 && (
-                    <TouchableOpacity
-                      activeOpacity={0.7}
-                      onPress={() => onOpenZone(flat.id, zone)}
-                      style={[styles.miniBedPill, styles.moreBedsPill]}
-                    >
-                      <Text style={styles.moreBedsText}>
-                        +{zone.beds.length - 6} More
-                      </Text>
-                      <Ionicons
-                        name="arrow-forward"
-                        size={12}
-                        color={COLORS.accent}
-                      />
-                    </TouchableOpacity>
+                  {zone.beds && zone.beds.length > 0 ? (
+                    zone.beds.map((bed) => {
+                      const colors = getStatusColor(bed.status);
+                      return (
+                        <TouchableOpacity
+                          key={bed.id}
+                          activeOpacity={0.7}
+                          onPress={() =>
+                            onQuickToggleBed(flat.id, zone.id, bed)
+                          }
+                          style={[
+                            styles.miniBedPill,
+                            {
+                              backgroundColor: colors.bg,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                        >
+                          <Ionicons name="bed" size={12} color={colors.icon} />
+                          <Text
+                            style={[styles.miniBedText, { color: colors.text }]}
+                          >
+                            {bed.bedNumber}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })
+                  ) : (
+                    <Text style={styles.noBedsText}>
+                      No beds configured in this zone
+                    </Text>
                   )}
                 </View>
               </View>
@@ -256,6 +294,8 @@ const FlatCard: React.FC<FlatCardProps> = React.memo(
 // --- Main Screen Component ---
 export default function RoomsScreen() {
   const [flats, setFlats] = useState<Flat[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterType>("ALL");
 
@@ -265,59 +305,90 @@ export default function RoomsScreen() {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ["50%", "75%"], []);
 
-  // --- Async Data Operations ---
-  const loadFlats = async () => {
+  // 🌐 --- API Fetch ---
+ const fetchFlatsFromAPI = async () => {
+  try {
+    const storedUserId = await AsyncStorage.getItem("userId");
+
+    if (!storedUserId) {
+      console.log("No UserId found in AsyncStorage");
+      await loadFromLocalStorage();
+      return;
+    }
+
+    const response = await api.get(`/Flats/user/${storedUserId}`);
+    console.log("🔥 EXACT BACKEND DATA:", JSON.stringify(response.data, null, 2));
+    
+    if (response.data && response.data.success) {
+      const rawData = response.data.data ?? [];
+
+      // 🛠️ Mapping backend keys to frontend expectations
+      const formattedFlats = rawData.map((flat: any) => ({
+        ...flat,
+        // roomBreakup ko zones me map kar rahe hain taaki UI me error na aaye
+        zones: flat.roomBreakup?.map((room: any) => ({
+          zoneName: room.zoneName,
+          type: room.type === 1 ? "AC" : "Non AC", // Aapke type numbering ke hisab se
+          capacity: room.capacity,
+          occupiedBeds: room.occupiedBeds,
+          vacantBeds: room.vacantBeds,
+          roomRent: room.roomRent,
+          // Per bed rent calculate kar rahe hain taaki agar UI me rentPerBed chahiye ho toh mil jaye
+          rentPerBed: room.capacity > 0 ? room.roomRent / room.capacity : room.roomRent,
+        })) || [],
+      }));
+
+      setFlats(formattedFlats);
+      await AsyncStorage.setItem("flats_2bhk", JSON.stringify(formattedFlats));
+    }
+  } catch (error: any) {
+    console.log("API Fetch error, loading local cache:", error?.message);
+    await loadFromLocalStorage();
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+};
+
+  const loadFromLocalStorage = async () => {
     try {
       const data = await AsyncStorage.getItem("flats_2bhk");
       if (data) {
-        const parsed: Flat[] = JSON.parse(data);
-        const migratedFlats = parsed.map((f) => ({
-          ...f,
-          zones: f.zones.map((z) => ({
-            ...z,
-            beds: z.beds.map((b: any) => ({
-              ...b,
-              status: b.status || (b.isOccupied ? "occupied" : "vacant"),
-            })),
-          })),
-        }));
-        setFlats(migratedFlats);
-      } else {
-        setFlats([]);
+        setFlats(JSON.parse(data));
       }
-    } catch (error) {
-      console.error("Failed to load flats:", error);
+    } catch (err) {
+      console.error("Failed to load local storage:", err);
     }
   };
 
   useFocusEffect(
     useCallback(() => {
-      loadFlats();
+      setLoading(true);
+      fetchFlatsFromAPI();
     }, []),
   );
 
-  const saveFlatsToStorage = async (updatedFlats: Flat[]) => {
-    setFlats(updatedFlats);
-    try {
-      await AsyncStorage.setItem("flats_2bhk", JSON.stringify(updatedFlats));
-    } catch (e) {
-      console.error("Failed to save flats:", e);
-    }
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchFlatsFromAPI();
   };
 
-  // --- Calculations for Analytics Banner ---
+  // 📊 --- Global Top Header Stats Calculation ---
   const globalStats = useMemo(() => {
+    let totalFlats = flats.length;
     let totalBeds = 0;
     let occupiedBeds = 0;
     let totalRevenue = 0;
 
     flats.forEach((f) => {
-      f.zones.forEach((z) => {
-        totalBeds += z.capacity;
-        z.beds.forEach((b) => {
+      f.zones?.forEach((z) => {
+        const zoneCapacity = z.capacity || z.beds?.length || 0;
+        totalBeds += zoneCapacity;
+
+        z.beds?.forEach((b) => {
           if (b.status === "occupied" || b.status === "reserved") {
             occupiedBeds++;
-            totalRevenue += z.rentPerBed;
+            totalRevenue += z.rentPerBed || 0;
           }
         });
       });
@@ -327,7 +398,14 @@ export default function RoomsScreen() {
     const occupancyRate =
       totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
 
-    return { totalBeds, occupiedBeds, vacantBeds, totalRevenue, occupancyRate };
+    return {
+      totalFlats,
+      totalBeds,
+      occupiedBeds,
+      vacantBeds,
+      totalRevenue,
+      occupancyRate,
+    };
   }, [flats]);
 
   // --- Filter & Search Logic ---
@@ -336,42 +414,90 @@ export default function RoomsScreen() {
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
         !q ||
-        flat.flatNumber.toLowerCase().includes(q) ||
-        flat.apartmentName.toLowerCase().includes(q) ||
-        flat.zones.some((z) =>
-          z.beds.some(
+        flat.flatNumber?.toLowerCase().includes(q) ||
+        flat.apartmentName?.toLowerCase().includes(q) ||
+        flat.zones?.some((z) =>
+          z.beds?.some(
             (b) =>
               b.tenantName?.toLowerCase().includes(q) ||
-              b.bedNumber.toLowerCase().includes(q),
+              b.bedNumber?.toLowerCase().includes(q),
           ),
         );
 
       if (!matchesSearch) return false;
 
-      const totalCapacity = flat.zones.reduce((acc, z) => acc + z.capacity, 0);
-      const totalOccupied = flat.zones.reduce(
-        (acc, z) =>
-          acc +
-          z.beds.filter(
-            (b) => b.status === "occupied" || b.status === "reserved",
-          ).length,
-        0,
-      );
+      const totalCapacity =
+        flat.zones?.reduce(
+          (acc, z) => acc + (z.capacity || z.beds?.length || 0),
+          0,
+        ) || 0;
+      const totalOccupied =
+        flat.zones?.reduce(
+          (acc, z) =>
+            acc +
+            (z.beds?.filter(
+              (b) => b.status === "occupied" || b.status === "reserved",
+            ).length || 0),
+          0,
+        ) || 0;
       const vacantCount = totalCapacity - totalOccupied;
 
       if (activeFilter === "VACANT") return vacantCount > 0;
       if (activeFilter === "FULL") return vacantCount === 0;
-      if (activeFilter === "AC") return flat.zones.some((z) => z.type === "AC");
+      if (activeFilter === "AC")
+        return flat.zones?.some((z) => z.type === "AC");
 
       return true;
     });
   }, [flats, searchQuery, activeFilter]);
 
-  // --- Bed Action Handler ---
+  // 🌐 --- Bed Update API ---
+  const updateSingleBed = async (
+    flatId: string,
+    zoneId: string,
+    bedId: string,
+    status: BedStatus,
+    tenantName?: string,
+  ) => {
+    try {
+      const updatedFlats = flats.map((flat) => {
+        if (flat.id !== flatId) return flat;
+        return {
+          ...flat,
+          zones: flat.zones.map((zone) => {
+            if (zone.id !== zoneId) return zone;
+            const updatedBeds = zone.beds.map((b) =>
+              b.id === bedId ? { ...b, status, tenantName } : b,
+            );
+            const updatedZone = { ...zone, beds: updatedBeds };
+            if (selectedZone?.id === zoneId) {
+              setSelectedZone(updatedZone);
+            }
+            return updatedZone;
+          }),
+        };
+      });
+
+      setFlats(updatedFlats);
+      await AsyncStorage.setItem("flats_2bhk", JSON.stringify(updatedFlats));
+
+      await api.put(`/Bed/update-status`, {
+        bedId,
+        status,
+        tenantName: tenantName || null,
+      });
+    } catch (error: any) {
+      Alert.alert("Error", "Failed to sync bed status with server.");
+      fetchFlatsFromAPI();
+    }
+  };
+
   const handleBedAction = (flatId: string, zoneId: string, bed: Bed) => {
     Alert.alert(
       `Manage Bed ${bed.bedNumber}`,
-      `Current Status: ${bed.status.toUpperCase()}${bed.tenantName ? ` (${bed.tenantName})` : ""}`,
+      `Current Status: ${bed.status.toUpperCase()}${
+        bed.tenantName ? ` (${bed.tenantName})` : ""
+      }`,
       [
         {
           text: "Mark Vacant",
@@ -427,37 +553,6 @@ export default function RoomsScreen() {
     );
   };
 
-  const updateSingleBed = (
-    flatId: string,
-    zoneId: string,
-    bedId: string,
-    status: BedStatus,
-    tenantName?: string,
-  ) => {
-    const updatedFlats = flats.map((flat) => {
-      if (flat.id !== flatId) return flat;
-
-      return {
-        ...flat,
-        zones: flat.zones.map((zone) => {
-          if (zone.id !== zoneId) return zone;
-
-          const updatedBeds = zone.beds.map((b) =>
-            b.id === bedId ? { ...b, status, tenantName } : b,
-          );
-
-          const updatedZone = { ...zone, beds: updatedBeds };
-          if (selectedZone?.id === zoneId) {
-            setSelectedZone(updatedZone);
-          }
-          return updatedZone;
-        }),
-      };
-    });
-
-    saveFlatsToStorage(updatedFlats);
-  };
-
   const handleDeleteFlat = useCallback(
     (flatId: string, flatNumber: string) => {
       Alert.alert(
@@ -468,9 +563,21 @@ export default function RoomsScreen() {
           {
             text: "Delete",
             style: "destructive",
-            onPress: () => {
-              const updated = flats.filter((f) => f.id !== flatId);
-              saveFlatsToStorage(updated);
+            onPress: async () => {
+              try {
+                await api.delete(`/Flat/${flatId}`);
+                const updated = flats.filter((f) => f.id !== flatId);
+                setFlats(updated);
+                await AsyncStorage.setItem(
+                  "flats_2bhk",
+                  JSON.stringify(updated),
+                );
+              } catch (error: any) {
+                Alert.alert(
+                  "Error",
+                  error?.response?.data?.message || "Failed to delete flat",
+                );
+              }
             },
           },
         ],
@@ -479,7 +586,6 @@ export default function RoomsScreen() {
     [flats],
   );
 
-  // --- Edit Flat Navigation Handler ---
   const handleEditFlat = useCallback((flatId: string) => {
     router.push({
       pathname: "/add-2bhk-flat",
@@ -538,24 +644,26 @@ export default function RoomsScreen() {
         </TouchableOpacity>
       );
     },
-    [selectedFlatId, selectedZone, handleBedAction],
+    [selectedFlatId, selectedZone],
   );
 
   return (
     <View style={styles.container}>
-      {/* Header */}
+      {/* Top Header */}
       <View style={styles.header}>
-        <Text style={TYPOGRAPHY.headerTitle}>PG Rooms &amp; Dashboard</Text>
+        <Text style={TYPOGRAPHY.headerTitle}>PG Rooms & Dashboard</Text>
         <Text style={styles.subtitle}>
-          Instant bed status, occupancy &amp; financial overview
+          {globalStats.totalFlats} Flats • {globalStats.totalBeds} Total Beds
         </Text>
       </View>
 
-      {/* Global Quick Stats Banner */}
+      {/* Global Quick Stats Banner (Top Header Total Data) */}
       <View style={styles.statsBanner}>
         <View style={styles.bannerStatBox}>
-          <Text style={TYPOGRAPHY.label}>Occupancy</Text>
-          <Text style={styles.bannerStatVal}>{globalStats.occupancyRate}%</Text>
+          <Text style={TYPOGRAPHY.label}>Total Revenue</Text>
+          <Text style={[styles.bannerStatVal, { color: COLORS.primary }]}>
+            ₹{globalStats.totalRevenue.toLocaleString()}
+          </Text>
         </View>
         <View style={styles.divider} />
         <View style={styles.bannerStatBox}>
@@ -566,10 +674,8 @@ export default function RoomsScreen() {
         </View>
         <View style={styles.divider} />
         <View style={styles.bannerStatBox}>
-          <Text style={TYPOGRAPHY.label}>Est. Revenue</Text>
-          <Text style={styles.bannerStatVal}>
-            ₹{globalStats.totalRevenue.toLocaleString()}
-          </Text>
+          <Text style={TYPOGRAPHY.label}>Occupancy</Text>
+          <Text style={styles.bannerStatVal}>{globalStats.occupancyRate}%</Text>
         </View>
       </View>
 
@@ -637,34 +743,48 @@ export default function RoomsScreen() {
         </ScrollView>
       </View>
 
-      {/* Flat List */}
-      <FlatList
-        data={filteredFlats}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <FlatCard
-            flat={item}
-            onDelete={handleDeleteFlat}
-            onEdit={handleEditFlat}
-            onOpenZone={openBedMatrix}
-            onQuickToggleBed={(flatId, zoneId, bed) =>
-              handleBedAction(flatId, zoneId, bed)
-            }
-          />
-        )}
-        contentContainerStyle={{ paddingBottom: 100 }}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyBox}>
-            <Ionicons
-              name="business-outline"
-              size={56}
-              color={COLORS.textMuted}
+      {/* Flat List / Loader */}
+      {loading ? (
+        <View style={styles.loaderBox}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Fetching Flats & Rooms...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredFlats}
+          keyExtractor={(item) => item.id}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={COLORS.primary}
             />
-            <Text style={styles.emptyText}>No matching flats found.</Text>
-          </View>
-        }
-      />
+          }
+          renderItem={({ item }) => (
+            <FlatCard
+              flat={item}
+              onDelete={handleDeleteFlat}
+              onEdit={handleEditFlat}
+              onOpenZone={openBedMatrix}
+              onQuickToggleBed={(flatId, zoneId, bed) =>
+                handleBedAction(flatId, zoneId, bed)
+              }
+            />
+          )}
+          contentContainerStyle={{ paddingBottom: 100 }}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyBox}>
+              <Ionicons
+                name="business-outline"
+                size={56}
+                color={COLORS.textMuted}
+              />
+              <Text style={styles.emptyText}>No matching flats found.</Text>
+            </View>
+          }
+        />
+      )}
 
       {/* FAB Button */}
       <TouchableOpacity
@@ -730,16 +850,7 @@ const styles = StyleSheet.create({
     paddingTop: 50,
   },
   header: {
-    marginBottom: SPACING.sm,
-  },
-  moreBedsPill: {
-    backgroundColor: "rgba(56, 189, 248, 0.1)",
-    borderColor: COLORS.accent,
-  },
-  moreBedsText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: COLORS.accent,
+    marginBottom: SPACING.xs,
   },
   subtitle: {
     color: COLORS.textSecondary,
@@ -753,7 +864,7 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderWidth: 1,
     borderColor: COLORS.border,
-    marginBottom: SPACING.md,
+    marginVertical: SPACING.md,
     alignItems: "center",
   },
   bannerStatBox: {
@@ -837,7 +948,7 @@ const styles = StyleSheet.create({
   },
   statusBadge: {
     paddingHorizontal: SPACING.sm,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: RADIUS.full,
     borderWidth: 1,
   },
@@ -849,7 +960,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   progressContainer: {
-    height: 5,
+    height: 6,
     backgroundColor: COLORS.border,
     borderRadius: 3,
     marginTop: SPACING.md,
@@ -863,21 +974,30 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 6,
+    marginTop: 8,
     marginBottom: SPACING.md,
+    paddingHorizontal: 2,
   },
-  revenueText: {
-    fontSize: 11,
-    color: COLORS.textSecondary,
+  revenueLabel: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    textTransform: "uppercase",
+    fontWeight: "600",
   },
   revenueHighlight: {
     color: COLORS.textPrimary,
-    fontWeight: "600",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  maxRevenue: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    fontWeight: "400",
   },
   occupancyRateText: {
-    fontSize: 11,
+    fontSize: 13,
     color: COLORS.accent,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   zonesList: {
     gap: SPACING.sm,
@@ -898,7 +1018,12 @@ const styles = StyleSheet.create({
   zoneTitleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: SPACING.xs,
+    gap: 6,
+  },
+  zoneTitleText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: COLORS.textPrimary,
   },
   zoneSubMeta: {
     color: COLORS.textSecondary,
@@ -918,7 +1043,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
-    marginTop: 4,
+    marginTop: 6,
   },
   miniBedPill: {
     flexDirection: "row",
@@ -927,7 +1052,27 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: RADIUS.sm,
     borderWidth: 1,
-    gap: 5,
+    gap: 4,
+  },
+  miniBedText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  noBedsText: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    fontStyle: "italic",
+  },
+  loaderBox: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 40,
+  },
+  loadingText: {
+    marginTop: 10,
+    color: COLORS.textSecondary,
+    fontSize: 13,
   },
   fab: {
     position: "absolute",
