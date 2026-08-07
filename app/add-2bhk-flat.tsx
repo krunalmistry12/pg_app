@@ -22,6 +22,15 @@ import {
 } from "../src/services/apiService";
 import { commonStyles } from "../src/styles/commonStyles";
 
+// 🟢 Helper Function: UUID Generator for new Zone and Bed IDs
+const generateUUID = (): string => {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 interface ZoneInput {
   id: string;
   zoneName: string;
@@ -77,31 +86,31 @@ export default function Add2BHKFlatScreen() {
     setLoading(true);
     try {
       const response = await getFlatByIdApi(id);
-
       const flatData = response.data?.data || response.data;
 
       if (flatData) {
-        // 2. Flat level fields set karein
         setFlatNumber(flatData.flatNumber || "");
         setApartmentName(flatData.apartmentName || "");
 
-        // 3. Zones aur Beds ko form ke state ke format me convert karke set karein
-        if (flatData.zones && flatData.zones.length > 0) {
-          const formattedZones = flatData.zones.map((zone: any) => {
+        const rawZones = flatData.zones || flatData.roomBreakup || [];
+
+        if (rawZones.length > 0) {
+          const formattedZones = rawZones.map((zone: any) => {
             const bedCount = zone.capacity || zone.beds?.length || 1;
-            // Individual bed rent ya room rent calculate karein
+            const bedsList = zone.beds || [];
+
             const bedRentVal =
-              zone.beds?.[0]?.bedRent ||
-              zone.beds?.[0]?.rent ||
-              (zone.roomRent ? zone.roomRent / bedCount : 0);
+              bedsList[0]?.bedRent ||
+              bedsList[0]?.rent ||
+              (zone.roomRent && bedCount > 0 ? zone.roomRent / bedCount : 0);
 
             return {
               id: zone.id || zone.zoneId,
               zoneName: zone.zoneName || "",
-              type: zone.type === 1 || zone.type === "AC" ? "AC" : "Non AC",
+              type: zone.type === 2 || zone.type === "AC" ? "AC" : "Non AC",
               bedsCount: bedCount.toString(),
-              rentPerBed: bedRentVal.toString(), // 👈 Yeh input field me dikhega
-              beds: zone.beds || [],
+              rentPerBed: bedRentVal.toString(),
+              existingBeds: bedsList, // Preserve exact existing beds structure
             };
           });
           setZones(formattedZones);
@@ -158,22 +167,32 @@ export default function Add2BHKFlatScreen() {
     );
   };
 
+  // 🟢 Fixed Bed Generator: Har bed ko VALID ID assign karega (Old ID or New UUID)
   const generateBeds = (
     count: number,
     existingBeds: any[] = [],
-    rentPerBed: number, // 👈 Yeh ab '30' hai
+    rentPerBed: number,
   ) => {
     return Array.from({ length: count }, (_, i) => {
       const oldBed = existingBeds && existingBeds[i] ? existingBeds[i] : null;
 
-      return {
-        id: oldBed?.id || oldBed?.bedId || null,
-        bedId: oldBed?.id || oldBed?.bedId || null,
-        bedNumber: oldBed?.bedNumber || `Bed ${i + 1}`,
-        status: oldBed?.status ?? 1,
-        tenantName: oldBed?.tenantName || "",
+      const validBedId =
+        oldBed?.id || oldBed?.bedId || oldBed?._id || undefined;
 
-        // 🔴 Individual Bed Rent = 30
+      const isRealId =
+        validBedId &&
+        !String(validBedId).startsWith("z-") &&
+        !String(validBedId).startsWith("bed-");
+
+      // Key Fix: Purani valid ID use hogi, nahi to FRESH UUID create hogi
+      const bedId = isRealId ? String(validBedId) : generateUUID();
+
+      return {
+        id: bedId,
+        bedId: bedId,
+        bedNumber: oldBed?.bedNumber || `B${i + 1}`,
+        status: typeof oldBed?.status === "number" ? oldBed.status : 1,
+        tenantName: oldBed?.tenantName || "",
         bedRent: rentPerBed,
         rent: rentPerBed,
       };
@@ -187,38 +206,39 @@ export default function Add2BHKFlatScreen() {
       return;
     }
 
-    // API Payload construct karna
     const payload: any = {
+      ...(isEditing && { id: flatId, flatId: flatId }),
       flatNumber: flatNumber.trim(),
       apartmentName: apartmentName.trim() || "Roma Apartment",
-      pricingType: "BED_WISE", // Ya jo aapki pricingType state hai
+      pricingType: "BED_WISE",
       userId: currentUserId,
       zones: zones.map((zone: any) => {
-        // 1. Bed count nikalen
         const count = Math.max(
           1,
-          Number(zone.bedsCount) || zone.beds?.length || 1,
+          Number(zone.bedsCount) || zone.existingBeds?.length || 1,
         );
-
-        // 2. Rent Per Bed (Aapne 30 enter kiya)
         const rentPerBed = Math.max(0, Number(zone.rentPerBed) || 0);
-
-        // 3. Room/Zone Total Rent = Rent Per Bed * Number of Beds
         const totalRoomRent = rentPerBed * count;
 
-        return {
-          id: zone.id || zone.zoneId || null,
-          zoneId: zone.id || zone.zoneId || null,
-          zoneName: zone.zoneName.trim() || "Zone",
-          type: zone.type === "AC" || zone.type === 1 ? 1 : 2,
-          capacity: count,
+        const rawZoneId = zone.id || zone.zoneId;
+        const isRealZoneId = rawZoneId && !String(rawZoneId).startsWith("z-");
 
-          // 🔴 Room Rent me Total bhejein
+        // Key Fix: Zone ID ke paas bhi hamesha valid GUID hoga
+        const finalZoneId = isRealZoneId ? String(rawZoneId) : generateUUID();
+
+        const bedsSource = zone.existingBeds?.length
+          ? zone.existingBeds
+          : zone.beds || [];
+
+        return {
+          id: finalZoneId,
+          zoneId: finalZoneId,
+          zoneName: zone.zoneName.trim() || "Zone",
+          type: zone.type === "AC" ? 2 : 1, // 2 = AC, 1 = Non AC
+          capacity: count,
           roomRent: totalRoomRent,
           rent: totalRoomRent,
-
-          // 🔴 Bed Rent me individual 30 bhejein
-          beds: generateBeds(count, zone.beds || zone.existingBeds, rentPerBed),
+          beds: generateBeds(count, bedsSource, rentPerBed),
         };
       }),
     };
@@ -226,18 +246,11 @@ export default function Add2BHKFlatScreen() {
     setLoading(true);
     try {
       if (isEditing && flatId) {
-        console.log("==========================================");
-        console.log(
-          "🚀 FRONTEND SE BHEJA JA RAHA PAYLOAD:",
-          JSON.stringify(payload, null, 2),
-        );
-        console.log("==========================================");
-        // 🟡 PUT API Call
+        console.log("🚀 PUT PAYLOAD:", JSON.stringify(payload, null, 2));
         await updateFlatApi(flatId, payload);
-
         Alert.alert("Success", `Flat ${flatNumber} updated successfully.`);
       } else {
-        // 🟢 POST API Call
+        console.log("🚀 POST PAYLOAD:", JSON.stringify(payload, null, 2));
         await createFlatApi(payload);
         Alert.alert(
           "Success",

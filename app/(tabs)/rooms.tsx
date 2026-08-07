@@ -41,6 +41,8 @@ export interface Zone {
   capacity: number;
   rentPerBed: number;
   beds: Bed[];
+  occupiedBeds?: number;
+  vacantBeds?: number;
 }
 
 export interface Flat {
@@ -106,9 +108,11 @@ const FlatCard: React.FC<FlatCardProps> = React.memo(
     flat.zones?.forEach((z) => {
       const capacity = z.capacity || z.beds?.length || 0;
       const occupiedInZone =
-        z.beds?.filter(
+        z.occupiedBeds ??
+        (z.beds?.filter(
           (b) => b.status === "occupied" || b.status === "reserved",
-        ).length || 0;
+        ).length ||
+          0);
 
       totalCapacity += capacity;
       totalOccupied += occupiedInZone;
@@ -208,17 +212,22 @@ const FlatCard: React.FC<FlatCardProps> = React.memo(
 
         {/* Zone Wise Bed View List */}
         <View style={styles.zonesList}>
-          {flat.zones?.map((zone) => {
+          {flat.zones?.map((zone, zIdx) => {
             const occupiedInZone =
-              zone.beds?.filter(
+              zone.occupiedBeds ??
+              (zone.beds?.filter(
                 (b) => b.status === "occupied" || b.status === "reserved",
-              ).length || 0;
+              ).length ||
+                0);
             const isAc = zone.type === "AC";
             const zoneVacant =
               (zone.capacity || zone.beds?.length || 0) - occupiedInZone;
 
+            // Ensured unique key fallback
+            const zoneKey = zone.id || `${flat.id}-zone-${zIdx}`;
+
             return (
-              <View key={zone.id} style={styles.zoneBox}>
+              <View key={zoneKey} style={styles.zoneBox}>
                 <View style={styles.zoneHeader}>
                   <View style={styles.zoneTitleRow}>
                     <Ionicons
@@ -250,11 +259,12 @@ const FlatCard: React.FC<FlatCardProps> = React.memo(
                 {/* Inline Zone Beds Matrix (Shows All Beds in Card) */}
                 <View style={styles.inlineBedGrid}>
                   {zone.beds && zone.beds.length > 0 ? (
-                    zone.beds.map((bed) => {
+                    zone.beds.map((bed, bIdx) => {
                       const colors = getStatusColor(bed.status);
+                      const bedKey = bed.id || `${zoneKey}-bed-${bIdx}`;
                       return (
                         <TouchableOpacity
-                          key={bed.id}
+                          key={bedKey}
                           activeOpacity={0.7}
                           onPress={() =>
                             onQuickToggleBed(flat.id, zone.id, bed)
@@ -306,49 +316,72 @@ export default function RoomsScreen() {
   const snapPoints = useMemo(() => ["50%", "75%"], []);
 
   // 🌐 --- API Fetch ---
- const fetchFlatsFromAPI = async () => {
-  try {
-    const storedUserId = await AsyncStorage.getItem("userId");
+  const fetchFlatsFromAPI = async () => {
+    try {
+      const storedUserId = await AsyncStorage.getItem("userId");
 
-    if (!storedUserId) {
-      console.log("No UserId found in AsyncStorage");
+      if (!storedUserId) {
+        console.log("No UserId found in AsyncStorage");
+        await loadFromLocalStorage();
+        return;
+      }
+
+      const response = await api.get(`/Flats/user/${storedUserId}`);
+
+      if (response.data && response.data.success) {
+        const rawData = response.data.data ?? [];
+
+        // 🛠️ Mapping backend keys & assigning guaranteed IDs/beds array
+        const formattedFlats = rawData.map((flat: any, fIdx: number) => {
+          const flatId = flat.id || `flat-${fIdx}`;
+          return {
+            ...flat,
+            id: flatId,
+            zones:
+              flat.roomBreakup?.map((room: any, rIdx: number) => {
+                const zoneId = room.id || `${flatId}-zone-${rIdx}`;
+                const capacity = room.capacity || 0;
+                const occupiedCount = room.occupiedBeds || 0;
+
+                // Build default beds array if not returned directly from API
+                const beds =
+                  room.beds ||
+                  Array.from({ length: capacity }, (_, bIdx) => ({
+                    id: `${zoneId}-bed-${bIdx + 1}`,
+                    bedNumber: `B${bIdx + 1}`,
+                    status: bIdx < occupiedCount ? "occupied" : "vacant",
+                    tenantName: bIdx < occupiedCount ? "Tenant" : undefined,
+                  }));
+
+                return {
+                  id: zoneId,
+                  zoneName: room.zoneName || `Zone ${rIdx + 1}`,
+                  type: room.type === 2 ? "AC" : "Non AC",
+                  capacity: capacity,
+                  occupiedBeds: room.occupiedBeds ?? 0,
+                  vacantBeds: room.vacantBeds ?? capacity - occupiedCount,
+                  rentPerBed:
+                    capacity > 0 ? room.roomRent / capacity : room.roomRent,
+                  beds: beds,
+                };
+              }) || [],
+          };
+        });
+
+        setFlats(formattedFlats);
+        await AsyncStorage.setItem(
+          "flats_2bhk",
+          JSON.stringify(formattedFlats),
+        );
+      }
+    } catch (error: any) {
+      console.log("API Fetch error, loading local cache:", error?.message);
       await loadFromLocalStorage();
-      return;
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-
-    const response = await api.get(`/Flats/user/${storedUserId}`);
-    console.log("🔥 EXACT BACKEND DATA:", JSON.stringify(response.data, null, 2));
-    
-    if (response.data && response.data.success) {
-      const rawData = response.data.data ?? [];
-
-      // 🛠️ Mapping backend keys to frontend expectations
-      const formattedFlats = rawData.map((flat: any) => ({
-        ...flat,
-        // roomBreakup ko zones me map kar rahe hain taaki UI me error na aaye
-        zones: flat.roomBreakup?.map((room: any) => ({
-          zoneName: room.zoneName,
-          type: room.type === 1 ? "AC" : "Non AC", // Aapke type numbering ke hisab se
-          capacity: room.capacity,
-          occupiedBeds: room.occupiedBeds,
-          vacantBeds: room.vacantBeds,
-          roomRent: room.roomRent,
-          // Per bed rent calculate kar rahe hain taaki agar UI me rentPerBed chahiye ho toh mil jaye
-          rentPerBed: room.capacity > 0 ? room.roomRent / room.capacity : room.roomRent,
-        })) || [],
-      }));
-
-      setFlats(formattedFlats);
-      await AsyncStorage.setItem("flats_2bhk", JSON.stringify(formattedFlats));
-    }
-  } catch (error: any) {
-    console.log("API Fetch error, loading local cache:", error?.message);
-    await loadFromLocalStorage();
-  } finally {
-    setLoading(false);
-    setRefreshing(false);
-  }
-};
+  };
 
   const loadFromLocalStorage = async () => {
     try {
@@ -385,12 +418,17 @@ export default function RoomsScreen() {
         const zoneCapacity = z.capacity || z.beds?.length || 0;
         totalBeds += zoneCapacity;
 
-        z.beds?.forEach((b) => {
-          if (b.status === "occupied" || b.status === "reserved") {
-            occupiedBeds++;
-            totalRevenue += z.rentPerBed || 0;
-          }
-        });
+        if (z.beds && z.beds.length > 0) {
+          z.beds.forEach((b) => {
+            if (b.status === "occupied" || b.status === "reserved") {
+              occupiedBeds++;
+              totalRevenue += z.rentPerBed || 0;
+            }
+          });
+        } else {
+          occupiedBeds += z.occupiedBeds || 0;
+          totalRevenue += (z.occupiedBeds || 0) * (z.rentPerBed || 0);
+        }
       });
     });
 
@@ -435,9 +473,11 @@ export default function RoomsScreen() {
         flat.zones?.reduce(
           (acc, z) =>
             acc +
-            (z.beds?.filter(
-              (b) => b.status === "occupied" || b.status === "reserved",
-            ).length || 0),
+            ((z.occupiedBeds ??
+              z.beds?.filter(
+                (b) => b.status === "occupied" || b.status === "reserved",
+              ).length) ||
+              0),
           0,
         ) || 0;
       const vacantCount = totalCapacity - totalOccupied;
@@ -469,7 +509,18 @@ export default function RoomsScreen() {
             const updatedBeds = zone.beds.map((b) =>
               b.id === bedId ? { ...b, status, tenantName } : b,
             );
-            const updatedZone = { ...zone, beds: updatedBeds };
+
+            const occupiedCount = updatedBeds.filter(
+              (b) => b.status === "occupied" || b.status === "reserved",
+            ).length;
+
+            const updatedZone = {
+              ...zone,
+              beds: updatedBeds,
+              occupiedBeds: occupiedCount,
+              vacantBeds: zone.capacity - occupiedCount,
+            };
+
             if (selectedZone?.id === zoneId) {
               setSelectedZone(updatedZone);
             }
@@ -616,10 +667,11 @@ export default function RoomsScreen() {
   );
 
   const renderBedItem: ListRenderItem<Bed> = useCallback(
-    ({ item }) => {
+    ({ item, index }) => {
       const colors = getStatusColor(item.status);
       return (
         <TouchableOpacity
+          key={item.id || `sheet-bed-${index}`}
           activeOpacity={0.7}
           onPress={() =>
             selectedFlatId &&
@@ -812,8 +864,11 @@ export default function RoomsScreen() {
                 {selectedZone?.zoneName}
               </Text>
               <Text style={styles.modalSub}>
-                ₹{selectedZone?.rentPerBed} / month per bed (
-                {selectedZone?.type})
+                ₹
+                {selectedZone?.rentPerBed
+                  ? Math.round(selectedZone.rentPerBed)
+                  : 0}{" "}
+                / month per bed ({selectedZone?.type})
               </Text>
             </View>
             <TouchableOpacity onPress={closeBedMatrix}>
@@ -826,9 +881,8 @@ export default function RoomsScreen() {
           </View>
 
           <BottomSheetFlatList
-            key={`bed-grid-${selectedZone?.id || "none"}-cols-4`}
             data={selectedZone?.beds || []}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) => item.id || `bed-${index}`}
             renderItem={renderBedItem}
             numColumns={4}
             columnWrapperStyle={styles.columnWrapper}

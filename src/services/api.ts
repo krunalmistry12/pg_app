@@ -1,7 +1,7 @@
 import axios from "axios";
-
+//ngrok http https://localhost:7180 --host-header=rewrite
 const api = axios.create({
-  baseURL: "https://8145-43-241-144-62.ngrok-free.app/api",
+  baseURL: "https://6463-43-241-144-62.ngrok-free.app/api",
   timeout: 30000,
   headers: {
     "Content-Type": "application/json",
