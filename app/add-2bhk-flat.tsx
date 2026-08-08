@@ -96,8 +96,17 @@ export default function Add2BHKFlatScreen() {
 
         if (rawZones.length > 0) {
           const formattedZones = rawZones.map((zone: any) => {
-            const bedCount = zone.capacity || zone.beds?.length || 1;
             const bedsList = zone.beds || [];
+            
+            // Sort beds properly by their number (B1, B2, B3... B11)
+            bedsList.sort((a: any, b: any) => {
+              const numA = parseInt((a.bedNumber || "").replace(/\D/g, ""), 10) || 0;
+              const numB = parseInt((b.bedNumber || "").replace(/\D/g, ""), 10) || 0;
+              return numA - numB;
+            });
+
+            const bedCount =
+              bedsList.length > 0 ? bedsList.length : zone.capacity || 1;
 
             const bedRentVal =
               bedsList[0]?.bedRent ||
@@ -110,7 +119,7 @@ export default function Add2BHKFlatScreen() {
               type: zone.type === 2 || zone.type === "AC" ? "AC" : "Non AC",
               bedsCount: bedCount.toString(),
               rentPerBed: bedRentVal.toString(),
-              existingBeds: bedsList, // Preserve exact existing beds structure
+              existingBeds: bedsList,
             };
           });
           setZones(formattedZones);
@@ -124,16 +133,15 @@ export default function Add2BHKFlatScreen() {
     }
   };
 
-  // Calculations for live summary
+  // Calculations for live summary based strictly on user input count
   const totalBeds = zones.reduce(
     (sum, z) => sum + (parseInt(z.bedsCount, 10) || 0),
     0,
   );
-  const totalPotentialRevenue = zones.reduce(
-    (sum, z) =>
-      sum + (parseInt(z.bedsCount, 10) || 0) * (parseFloat(z.rentPerBed) || 0),
-    0,
-  );
+  const totalPotentialRevenue = zones.reduce((sum, z) => {
+    const count = parseInt(z.bedsCount, 10) || 0;
+    return sum + count * (parseFloat(z.rentPerBed) || 0);
+  }, 0);
 
   const handleAddZone = () => {
     const zoneNumber = zones.length + 1;
@@ -167,43 +175,190 @@ export default function Add2BHKFlatScreen() {
     );
   };
 
-  // 🟢 Fixed Bed Generator: Har bed ko VALID ID assign karega (Old ID or New UUID)
-  const generateBeds = (
-    count: number,
-    existingBeds: any[] = [],
-    rentPerBed: number,
-  ) => {
-    return Array.from({ length: count }, (_, i) => {
-      const oldBed = existingBeds && existingBeds[i] ? existingBeds[i] : null;
+  // 🟢 Bulletproof Bed Generator: Occupied beds ki position fixed rahegi aur vacant beds aasaani se remove honge.
+ const generateBeds = (
+  inputCount: number,
+  existingBeds: any[] = [],
+  rentPerBed: number,
+) => {
+  // -----------------------------------------
+  // 1. Existing beds ko normalize karo
+  // -----------------------------------------
+  const mappedBeds = existingBeds.map((oldBed) => {
+    const validBedId =
+      oldBed?.id ||
+      oldBed?.bedId ||
+      oldBed?._id ||
+      generateUUID();
 
-      const validBedId =
-        oldBed?.id || oldBed?.bedId || oldBed?._id || undefined;
+    const isOccupied =
+      oldBed?.status === 2 ||
+      (oldBed?.tenantName &&
+        oldBed.tenantName.trim() !== "");
 
-      const isRealId =
-        validBedId &&
-        !String(validBedId).startsWith("z-") &&
-        !String(validBedId).startsWith("bed-");
+    const bedNumber =
+      oldBed?.bedNumber ||
+      `B${existingBeds.indexOf(oldBed) + 1}`;
 
-      // Key Fix: Purani valid ID use hogi, nahi to FRESH UUID create hogi
-      const bedId = isRealId ? String(validBedId) : generateUUID();
+    return {
+      id: validBedId,
+      bedId: validBedId,
+      bedNumber,
 
-      return {
-        id: bedId,
-        bedId: bedId,
-        bedNumber: oldBed?.bedNumber || `B${i + 1}`,
-        status: typeof oldBed?.status === "number" ? oldBed.status : 1,
-        tenantName: oldBed?.tenantName || "",
+      status: isOccupied
+        ? 2
+        : typeof oldBed?.status === "number"
+        ? oldBed.status
+        : 1,
+
+      tenantName: oldBed?.tenantName || "",
+
+      bedRent: rentPerBed,
+      rent: rentPerBed,
+
+      _isOccupied: isOccupied,
+    };
+  });
+
+  // -----------------------------------------
+  // 2. Occupied beds ko kabhi remove mat karo
+  // -----------------------------------------
+  const occupiedBeds = mappedBeds.filter(
+    (bed) => bed._isOccupied
+  );
+
+  // -----------------------------------------
+  // 3. Agar requested count occupied beds se
+  //    kam hai to minimum occupied count rakho
+  // -----------------------------------------
+  const targetCount = Math.max(
+    inputCount,
+    occupiedBeds.length
+  );
+
+  // -----------------------------------------
+  // 4. Agar count kam hua:
+  //    ONLY VACANT beds remove karo.
+  //
+  //    Highest-numbered vacant beds pehle remove
+  //    honge.
+  // -----------------------------------------
+  let finalBeds = [...mappedBeds];
+
+  if (finalBeds.length > targetCount) {
+    const removeCount =
+      finalBeds.length - targetCount;
+
+    const vacantBeds = finalBeds
+      .filter((bed) => !bed._isOccupied)
+      .sort((a, b) => {
+        const numA =
+          parseInt(
+            String(a.bedNumber).replace(/\D/g, ""),
+            10
+          ) || 0;
+
+        const numB =
+          parseInt(
+            String(b.bedNumber).replace(/\D/g, ""),
+            10
+          ) || 0;
+
+        return numB - numA;
+      });
+
+    // Remove only vacant beds
+    const bedsToRemove = new Set(
+      vacantBeds
+        .slice(0, removeCount)
+        .map((bed) => bed.id)
+    );
+
+    finalBeds = finalBeds.filter(
+      (bed) => !bedsToRemove.has(bed.id)
+    );
+  }
+
+  // -----------------------------------------
+  // 5. Agar count increase hua:
+  //    Missing bed numbers fill karo.
+  // -----------------------------------------
+  if (finalBeds.length < targetCount) {
+    const existingNumbers = new Set(
+      finalBeds.map((bed) => {
+        return (
+          parseInt(
+            String(bed.bedNumber).replace(/\D/g, ""),
+            10
+          ) || 0
+        );
+      })
+    );
+
+    let nextNumber = 1;
+
+    while (finalBeds.length < targetCount) {
+      while (existingNumbers.has(nextNumber)) {
+        nextNumber++;
+      }
+
+      const newBedId = generateUUID();
+
+      finalBeds.push({
+        id: newBedId,
+        bedId: newBedId,
+        bedNumber: `B${nextNumber}`,
+        status: 1,
+        tenantName: "",
         bedRent: rentPerBed,
         rent: rentPerBed,
-      };
-    });
-  };
+        _isOccupied: false,
+      });
+
+      existingNumbers.add(nextNumber);
+      nextNumber++;
+    }
+  }
+
+  // -----------------------------------------
+  // 6. Internal _isOccupied remove karo
+  // -----------------------------------------
+  return finalBeds.map((bed) => {
+    const { _isOccupied, ...rest } = bed;
+
+    return {
+      ...rest,
+      bedRent: rentPerBed,
+      rent: rentPerBed,
+    };
+  });
+};
 
   // 🟢 POST / PUT API Call - Save Flat & Rooms
   const handleSaveFlat = async () => {
     if (!flatNumber.trim()) {
       Alert.alert("Error", "Please enter flat number.");
       return;
+    }
+
+    // Validation Check: Agar user ne beds count occupied beds se kam kiya hai
+    for (const zone of zones) {
+      const existingBedsList = zone.existingBeds || [];
+      const inputCount = Number(zone.bedsCount) || 1;
+
+      const occupiedBedsCount = existingBedsList.filter(
+        (bed: any) =>
+          bed?.status === 2 ||
+          (bed?.tenantName && bed?.tenantName.trim() !== ""),
+      ).length;
+
+      if (inputCount < occupiedBedsCount) {
+        Alert.alert(
+          "Validation Error",
+          `In zone "${zone.zoneName}", there are ${occupiedBedsCount} occupied beds, but you entered bed count as ${inputCount}. You cannot reduce beds below the number of active tenants!`,
+        );
+        return;
+      }
     }
 
     const payload: any = {
@@ -213,32 +368,31 @@ export default function Add2BHKFlatScreen() {
       pricingType: "BED_WISE",
       userId: currentUserId,
       zones: zones.map((zone: any) => {
-        const count = Math.max(
-          1,
-          Number(zone.bedsCount) || zone.existingBeds?.length || 1,
-        );
+        const existingBedsList = zone.existingBeds || [];
+        const count = Number(zone.bedsCount) || 1;
         const rentPerBed = Math.max(0, Number(zone.rentPerBed) || 0);
-        const totalRoomRent = rentPerBed * count;
+
+        const generatedBedsList = generateBeds(
+          count,
+          existingBedsList,
+          rentPerBed,
+        );
+        const actualCapacity = generatedBedsList.length;
+        const totalRoomRent = rentPerBed * actualCapacity;
 
         const rawZoneId = zone.id || zone.zoneId;
         const isRealZoneId = rawZoneId && !String(rawZoneId).startsWith("z-");
-
-        // Key Fix: Zone ID ke paas bhi hamesha valid GUID hoga
         const finalZoneId = isRealZoneId ? String(rawZoneId) : generateUUID();
-
-        const bedsSource = zone.existingBeds?.length
-          ? zone.existingBeds
-          : zone.beds || [];
 
         return {
           id: finalZoneId,
           zoneId: finalZoneId,
           zoneName: zone.zoneName.trim() || "Zone",
           type: zone.type === "AC" ? 2 : 1, // 2 = AC, 1 = Non AC
-          capacity: count,
+          capacity: actualCapacity,
           roomRent: totalRoomRent,
           rent: totalRoomRent,
-          beds: generateBeds(count, bedsSource, rentPerBed),
+          beds: generatedBedsList,
         };
       }),
     };
@@ -252,10 +406,7 @@ export default function Add2BHKFlatScreen() {
       } else {
         console.log("🚀 POST PAYLOAD:", JSON.stringify(payload, null, 2));
         await createFlatApi(payload);
-        Alert.alert(
-          "Success",
-          `Flat ${flatNumber} created with ${totalBeds} total beds.`,
-        );
+        Alert.alert("Success", `Flat ${flatNumber} created successfully.`);
       }
       router.back();
     } catch (e: any) {

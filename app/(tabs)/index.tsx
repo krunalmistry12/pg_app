@@ -1,9 +1,12 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import React, { useRef, useState } from "react";
+import { jwtDecode } from "jwt-decode";
+import React, { useEffect, useState } from "react";
 import {
-  Animated,
+  ActivityIndicator,
   Modal,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -13,163 +16,158 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import {
+  DashboardDataResponse,
+  getDashboardDataApi,
+} from "../../src/services/dashboardApi"; // Import API
 
-interface QuickAction {
-  id: string;
-  title: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-  route: string;
-}
-
-interface RecentActivity {
-  id: string;
-  text: string;
-  time: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-}
-
-interface AlertItem {
-  id: string;
-  type: "rent" | "maintenance" | "notice";
-  title: string;
-  subtitle: string;
-  time: string;
-  route: string;
-  color: string;
-}
+const STORAGE_KEY = "@dashboard_cache_data";
 
 export default function Dashboard() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
-
-  // Explicitly false so it stays hidden initially
   const [isSearchVisible, setIsSearchVisible] = useState(false);
-  const scrollY = useRef(new Animated.Value(0)).current;
-
-  // Notifications State
-  const [alerts, setAlerts] = useState<AlertItem[]>([
-    {
-      id: "1",
-      type: "rent",
-      title: "Action Required: Rent Dues",
-      subtitle: "3 tenants have pending rent dues past due date.",
-      time: "10 mins ago",
-      route: "/rent",
-      color: "#EF4444",
-    },
-    {
-      id: "2",
-      type: "maintenance",
-      title: "New Maintenance Request",
-      subtitle: "Room 202 reported a leaking pipe issue.",
-      time: "1 hour ago",
-      route: "/complaints",
-      color: "#F59E0B",
-    },
-    {
-      id: "3",
-      type: "notice",
-      title: "Broadcast Notice Sent",
-      subtitle: "Water supply shutdown scheduled for tomorrow.",
-      time: "Yesterday",
-      route: "/notices",
-      color: "#3B82F6",
-    },
-  ]);
-
   const [isNotificationModalVisible, setIsNotificationModalVisible] =
     useState(false);
 
-  const handleDismissAlert = (id: string) => {
-    setAlerts((prev) => prev.filter((item) => item.id !== id));
-  };
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [dashboardData, setDashboardData] =
+    useState<DashboardDataResponse | null>(null);
 
-  // Scroll handler to detect deep pull down (swipe down from top)
-  const handleScrollRelease = (e: any) => {
-    const offsetY = e.nativeEvent.contentOffset.y;
-    // Agar user top par hai aur niche ki taraf pull karta hai (negative offset)
-    if (offsetY < -50) {
-      setIsSearchVisible(true);
+  // --- Helper to decode JWT token or fetch stored user details ---
+  const getAuthDetailsFromStorage = async () => {
+    try {
+      // Login screen wali exact keys use karein (without '@')
+      const userId = await AsyncStorage.getItem("userId");
+      const role = await AsyncStorage.getItem("userRole");
+
+      if (userId) {
+        return { userId, role: role || "SuperAdmin" };
+      }
+
+      // Agar direct userId nahi mili, toh token se decode kar lein
+      const token = await AsyncStorage.getItem("token"); // Login me "token" save kiya hai
+      if (token) {
+        const decoded: any = jwtDecode(token); // ya jo bhi aapka decoder ho
+        const extractedUserId =
+          decoded.id || decoded.userId || decoded.sub || "";
+        const extractedRole = decoded.role || "SuperAdmin";
+
+        return { userId: extractedUserId, role: extractedRole };
+      }
+    } catch (e) {
+      console.error("Error reading auth data from storage:", e);
+    }
+    return { userId: null, role: "SuperAdmin" };
+  };
+  // --- Load Data: Pehle Local Storage se, phir API se ---
+  const loadDashboardData = async (isRefresh = false) => {
+    try {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        // Step 1: Instant load from local storage cache to prevent lag
+        const cachedData = await AsyncStorage.getItem(STORAGE_KEY);
+        if (cachedData) {
+          const parsedData: DashboardDataResponse = JSON.parse(cachedData);
+          setDashboardData(parsedData);
+          setLoading(false);
+        }
+      }
+
+      // Step 2: Token / Storage se userId aur role fetch karein
+      const { userId, role } = await getAuthDetailsFromStorage();
+
+      if (!userId) {
+        console.warn("User ID not found in storage. Redirecting to login...");
+        router.replace("/login" as any); // Agar user logged in nahi hai toh login page par bhej dein
+        return;
+      }
+
+      // Step 3: Fetch fresh data using API with dynamic parameters
+      const freshData = await getDashboardDataApi(userId, role);
+
+      // Step 4: Update State & Save to Local Storage Cache
+      setDashboardData(freshData);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(freshData));
+    } catch (error) {
+      console.error("Data sync error:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const quickActions: QuickAction[] = [
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const handleDismissAlert = async (id: string) => {
+    if (!dashboardData) return;
+    const updatedAlerts = dashboardData.alerts.filter((item) => item.id !== id);
+    const updatedData = { ...dashboardData, alerts: updatedAlerts };
+
+    setDashboardData(updatedData);
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData));
+  };
+
+  const quickActions = [
     {
       id: "1",
       title: "Add Tenant",
-      icon: "person-add-outline",
+      icon: "person-add-outline" as const,
       color: "#3B82F6",
       route: "/add-tenant",
     },
     {
       id: "2",
       title: "Add Room",
-      icon: "business-outline",
+      icon: "business-outline" as const,
       color: "#8B5CF6",
       route: "/add-2bhk-flat",
     },
     {
       id: "3",
       title: "Collect Rent",
-      icon: "wallet-outline",
+      icon: "wallet-outline" as const,
       color: "#10B981",
       route: "/rent",
     },
     {
       id: "4",
       title: "Complaints",
-      icon: "alert-circle-outline",
+      icon: "alert-circle-outline" as const,
       color: "#EF4444",
       route: "/complaints",
     },
     {
       id: "5",
       title: "Notice Board",
-      icon: "megaphone-outline",
+      icon: "megaphone-outline" as const,
       color: "#F59E0B",
       route: "/notices",
     },
     {
       id: "6",
       title: "Utility Bills",
-      icon: "flash-outline",
+      icon: "flash-outline" as const,
       color: "#06B6D4",
       route: "/utilities",
     },
   ];
 
-  const recentActivities: RecentActivity[] = [
-    {
-      id: "1",
-      text: "Rahul paid August rent ₹6,500",
-      time: "5 mins ago",
-      icon: "checkmark-circle-outline",
-      color: "#10B981",
-    },
-    {
-      id: "2",
-      text: "New maintenance request: Room 202",
-      time: "1 hour ago",
-      icon: "construct-outline",
-      color: "#EF4444",
-    },
-    {
-      id: "3",
-      text: "Aman Patel allocated to Room 101-B",
-      time: "3 hours ago",
-      icon: "key-outline",
-      color: "#3B82F6",
-    },
-    {
-      id: "4",
-      text: "Broadcast sent: Water supply shutdown",
-      time: "Yesterday",
-      icon: "megaphone-outline",
-      color: "#F59E0B",
-    },
-  ];
+  if (loading && !dashboardData) {
+    return (
+      <SafeAreaView style={[styles.safeArea, styles.centerContainer]}>
+        <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
+        <ActivityIndicator size="large" color="#3B82F6" />
+        <Text style={styles.loadingText}>Loading Dashboard...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  const primaryAlert = dashboardData?.alerts?.[0];
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -179,29 +177,19 @@ export default function Dashboard() {
       <View style={styles.stickyHeader}>
         <View>
           <Text style={styles.greeting}>👋 Welcome Back,</Text>
-          <Text style={styles.username}>Kunal Mistry</Text>
+          <Text style={styles.username}>
+            {dashboardData?.ownerName || "Owner"}
+          </Text>
         </View>
         <View style={styles.headerRight}>
-          {/* Search Toggle Icon Button in Header for quick access */}
-          {/* <TouchableOpacity
-            style={[
-              styles.iconButton,
-              isSearchVisible && {
-                borderColor: "#3B82F6",
-                backgroundColor: "#1E3A8A",
-              },
-            ]}
-            onPress={() => setIsSearchVisible(!isSearchVisible)}
-          >
-            <Ionicons name="search-outline" size={20} color="#F8FAFC" />
-          </TouchableOpacity> */}
-
           <TouchableOpacity
             style={styles.iconButton}
             onPress={() => setIsNotificationModalVisible(true)}
           >
             <Ionicons name="notifications-outline" size={20} color="#F8FAFC" />
-            {alerts.length > 0 && <View style={styles.notificationBadge} />}
+            {(dashboardData?.alerts?.length || 0) > 0 && (
+              <View style={styles.notificationBadge} />
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -209,7 +197,11 @@ export default function Dashboard() {
             style={styles.profileCircle}
             onPress={() => router.push("/profile" as any)}
           >
-            <Text style={styles.profileText}>K</Text>
+            <Text style={styles.profileText}>
+              {dashboardData?.ownerName
+                ? dashboardData.ownerName.charAt(0).toUpperCase()
+                : "O"}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -218,24 +210,15 @@ export default function Dashboard() {
         style={styles.container}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
-        onScrollEndDrag={handleScrollRelease}
-        scrollEventThrottle={16}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadDashboardData(true)}
+            tintColor="#3B82F6"
+          />
+        }
       >
-        {/* Subtle Pull Hint (Only shows when search is hidden) */}
-        {/* {!isSearchVisible && (
-          <TouchableOpacity
-            style={styles.pullHintBox}
-            onPress={() => setIsSearchVisible(true)}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="chevron-down-outline" size={13} color="#64748B" />
-            <Text style={styles.pullHintText}>
-              Pull down or tap search icon above
-            </Text>
-          </TouchableOpacity>
-        )} */}
-
-        {/* Global Quick Search Bar - Conditionally Rendered */}
+        {/* Global Quick Search Bar */}
         {isSearchVisible && (
           <View style={styles.searchContainer}>
             <Ionicons
@@ -264,37 +247,37 @@ export default function Dashboard() {
         )}
 
         {/* Dynamic Alert Banner */}
-        {alerts.length > 0 && (
+        {primaryAlert && (
           <View
             style={[
               styles.alertBanner,
               {
-                backgroundColor: `${alerts[0].color}12`,
-                borderColor: `${alerts[0].color}40`,
+                backgroundColor: `${primaryAlert.color}12`,
+                borderColor: `${primaryAlert.color}40`,
               },
             ]}
           >
             <TouchableOpacity
               style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
               activeOpacity={0.8}
-              onPress={() => router.push(alerts[0].route as any)}
+              onPress={() => router.push(primaryAlert.route as any)}
             >
               <View
                 style={[
                   styles.alertIconBox,
-                  { backgroundColor: `${alerts[0].color}25` },
+                  { backgroundColor: `${primaryAlert.color}25` },
                 ]}
               >
                 <Ionicons
                   name={
-                    alerts[0].type === "rent"
+                    primaryAlert.type === "rent"
                       ? "alert"
-                      : alerts[0].type === "maintenance"
+                      : primaryAlert.type === "maintenance"
                         ? "construct"
                         : "megaphone"
                   }
                   size={18}
-                  color={alerts[0].color}
+                  color={primaryAlert.color}
                 />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
@@ -305,15 +288,17 @@ export default function Dashboard() {
                     alignItems: "center",
                   }}
                 >
-                  <Text style={[styles.alertTitle, { color: alerts[0].color }]}>
-                    {alerts[0].title}
+                  <Text
+                    style={[styles.alertTitle, { color: primaryAlert.color }]}
+                  >
+                    {primaryAlert.title}
                   </Text>
                   <Text style={styles.alertCounter}>
-                    {alerts.length} Pending
+                    {dashboardData?.alerts?.length} Pending
                   </Text>
                 </View>
                 <Text style={styles.alertSubtitle} numberOfLines={1}>
-                  {alerts[0].subtitle}
+                  {primaryAlert.subtitle}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -330,24 +315,38 @@ export default function Dashboard() {
         {/* Revenue Card Banner */}
         <View style={styles.revenueCard}>
           <View style={styles.revenueHeader}>
-            <Text style={styles.revenueLabel}>August Revenue Overview</Text>
+            <Text style={styles.revenueLabel}>
+              {dashboardData?.revenueOverview?.monthName || "Current"} Revenue
+              Overview
+            </Text>
             <View style={styles.badge}>
               <Text style={styles.badgeText}>Live Sync</Text>
             </View>
           </View>
-          <Text style={styles.revenueAmount}>₹92,500</Text>
+          <Text style={styles.revenueAmount}>
+            ₹
+            {(
+              dashboardData?.revenueOverview?.totalExpectedRevenue || 0
+            ).toLocaleString("en-IN")}
+          </Text>
           <View style={styles.financialSplitRow}>
             <View style={styles.splitBox}>
               <Text style={styles.splitLabel}>Collected</Text>
               <Text style={[styles.splitValue, { color: "#34D399" }]}>
-                ₹78,500
+                ₹
+                {(
+                  dashboardData?.revenueOverview?.totalCollected || 0
+                ).toLocaleString("en-IN")}
               </Text>
             </View>
             <View style={styles.splitDivider} />
             <View style={styles.splitBox}>
               <Text style={styles.splitLabel}>Pending Due</Text>
               <Text style={[styles.splitValue, { color: "#FCA5A5" }]}>
-                ₹14,000
+                ₹
+                {(
+                  dashboardData?.revenueOverview?.totalPendingDue || 0
+                ).toLocaleString("en-IN")}
               </Text>
             </View>
           </View>
@@ -389,8 +388,13 @@ export default function Dashboard() {
               </View>
               <Text style={styles.cardTitle}>Total Rooms</Text>
             </View>
-            <Text style={styles.cardValue}>24</Text>
-            <Text style={styles.cardSubText}>22 Occupied • 2 Vacant</Text>
+            <Text style={styles.cardValue}>
+              {dashboardData?.propertyMetrics?.totalRooms || 0}
+            </Text>
+            <Text style={styles.cardSubText}>
+              {dashboardData?.propertyMetrics?.occupiedRooms || 0} Occupied •{" "}
+              {dashboardData?.propertyMetrics?.vacantRooms || 0} Vacant
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -403,8 +407,13 @@ export default function Dashboard() {
               </View>
               <Text style={styles.cardTitle}>Active Tenants</Text>
             </View>
-            <Text style={styles.cardValue}>68</Text>
-            <Text style={styles.cardSubText}>+4 joined this month</Text>
+            <Text style={styles.cardValue}>
+              {dashboardData?.propertyMetrics?.activeTenants || 0}
+            </Text>
+            <Text style={styles.cardSubText}>
+              +{dashboardData?.propertyMetrics?.newJoinersThisMonth || 0} joined
+              this month
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -412,10 +421,20 @@ export default function Dashboard() {
         <View style={styles.occupancyCard}>
           <View style={styles.occupancyHeader}>
             <Text style={styles.cardSectionTitle}>Overall Occupancy Rate</Text>
-            <Text style={styles.occupancyValue}>85% (Filled)</Text>
+            <Text style={styles.occupancyValue}>
+              {dashboardData?.propertyMetrics?.occupancyPercentage || 0}%
+              (Filled)
+            </Text>
           </View>
           <View style={styles.progressBg}>
-            <View style={styles.progressFill} />
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  width: `${dashboardData?.propertyMetrics?.occupancyPercentage || 0}%`,
+                },
+              ]}
+            />
           </View>
         </View>
 
@@ -428,30 +447,41 @@ export default function Dashboard() {
         </View>
 
         <View style={styles.activityContainer}>
-          {recentActivities.map((act, index) => (
-            <View
-              key={act.id}
-              style={[
-                styles.activityRow,
-                index === recentActivities.length - 1 && {
-                  borderBottomWidth: 0,
-                },
-              ]}
-            >
+          {dashboardData?.recentActivities?.length === 0 ? (
+            <Text style={styles.emptyActivityText}>
+              No recent activities found.
+            </Text>
+          ) : (
+            dashboardData?.recentActivities?.map((act, index) => (
               <View
+                key={act.id}
                 style={[
-                  styles.activityIconBg,
-                  { backgroundColor: `${act.color}18` },
+                  styles.activityRow,
+                  index ===
+                    (dashboardData?.recentActivities?.length || 1) - 1 && {
+                    borderBottomWidth: 0,
+                  },
                 ]}
               >
-                <Ionicons name={act.icon} size={18} color={act.color} />
+                <View
+                  style={[
+                    styles.activityIconBg,
+                    { backgroundColor: `${act.color}18` },
+                  ]}
+                >
+                  <Ionicons
+                    name={act.icon as any}
+                    size={18}
+                    color={act.color}
+                  />
+                </View>
+                <View style={styles.activityContent}>
+                  <Text style={styles.activityText}>{act.text}</Text>
+                  <Text style={styles.activityTime}>{act.time}</Text>
+                </View>
               </View>
-              <View style={styles.activityContent}>
-                <Text style={styles.activityText}>{act.text}</Text>
-                <Text style={styles.activityTime}>{act.time}</Text>
-              </View>
-            </View>
-          ))}
+            ))
+          )}
         </View>
       </ScrollView>
 
@@ -471,7 +501,9 @@ export default function Dashboard() {
                 <Ionicons name="notifications" size={20} color="#3B82F6" />
                 <Text style={styles.modalTitle}>System Notifications</Text>
                 <View style={styles.modalCountBadge}>
-                  <Text style={styles.modalCountText}>{alerts.length}</Text>
+                  <Text style={styles.modalCountText}>
+                    {dashboardData?.alerts?.length || 0}
+                  </Text>
                 </View>
               </View>
               <TouchableOpacity
@@ -486,7 +518,7 @@ export default function Dashboard() {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingVertical: 10 }}
             >
-              {alerts.length === 0 ? (
+              {dashboardData?.alerts?.length === 0 ? (
                 <View style={styles.emptyNotificationBox}>
                   <Ionicons
                     name="checkmark-done-circle-outline"
@@ -501,7 +533,7 @@ export default function Dashboard() {
                   </Text>
                 </View>
               ) : (
-                alerts.map((item) => (
+                dashboardData?.alerts?.map((item) => (
                   <View
                     key={item.id}
                     style={[
@@ -556,6 +588,8 @@ export default function Dashboard() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#0F172A" },
+  centerContainer: { justifyContent: "center", alignItems: "center" },
+  loadingText: { color: "#94A3B8", marginTop: 10, fontSize: 14 },
   stickyHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -600,15 +634,6 @@ const styles = StyleSheet.create({
     borderColor: "#3B82F6",
   },
   profileText: { color: "#FFFFFF", fontWeight: "bold", fontSize: 15 },
-  pullHintBox: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 6,
-    marginBottom: 10,
-    gap: 4,
-  },
-  pullHintText: { color: "#64748B", fontSize: 11, fontWeight: "500" },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -787,12 +812,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     overflow: "hidden",
   },
-  progressFill: {
-    width: "85%",
-    height: "100%",
-    backgroundColor: "#22C55E",
-    borderRadius: 4,
-  },
+  progressFill: { height: "100%", backgroundColor: "#22C55E", borderRadius: 4 },
   sectionHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -804,7 +824,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#1E293B",
     borderRadius: 16,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
     marginBottom: 20,
     borderWidth: 1,
     borderColor: "#334155",
@@ -827,6 +847,12 @@ const styles = StyleSheet.create({
   activityContent: { flex: 1 },
   activityText: { color: "#F1F5F9", fontSize: 14, fontWeight: "500" },
   activityTime: { color: "#64748B", fontSize: 12, marginTop: 2 },
+  emptyActivityText: {
+    color: "#64748B",
+    textAlign: "center",
+    fontSize: 13,
+    paddingVertical: 10,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.8)",

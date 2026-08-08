@@ -2,8 +2,8 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
@@ -18,11 +18,20 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import api from "@/src/services/api";
-import { createTenantApi, CreateTenantPayload } from "@/src/services/tenantApi";
+import {
+  createTenantApi,
+  CreateTenantPayload,
+  updateTenantApi,
+} from "@/src/services/tenantApi";
 import { COLORS, RADIUS, SPACING, TYPOGRAPHY } from "../src/constants/theme";
 import { commonStyles } from "../src/styles/commonStyles";
 
 type AllocationType = "FULL_FLAT" | "ROOM" | "BED";
+type PoliceVerificationStatus =
+  | "NOT_STARTED"
+  | "IN_PROGRESS"
+  | "VERIFIED"
+  | "REJECTED";
 
 interface Attachment {
   uri: string;
@@ -31,58 +40,128 @@ interface Attachment {
 }
 
 interface Bed {
-  id: string;
-  bedNo: string;
-  rent: number;
+  id?: string | number;
+  bedId?: string | number;
+  bedNumber?: string;
+  bedNo?: string;
+  rent?: number;
+  bedRent?: number;
   isOccupied?: boolean;
+  status?: number;
+  tenantName?: string;
+  currentTenant?: string;
 }
 
 interface Room {
-  id: string;
-  roomName: string;
-  rent: number;
+  id?: string | number;
+  zoneId?: string | number;
+  roomId?: string | number;
+  zoneName?: string;
+  roomName?: string;
+  name?: string;
+  rent?: number;
+  roomRent?: number;
+  capacity?: number;
   isOccupied?: boolean;
-  beds: Bed[];
+  status?: number;
+  tenantName?: string;
+  currentTenant?: string;
+  beds?: Bed[];
+  bedBreakup?: Bed[];
+  zoneBeds?: Bed[];
+  roomBeds?: Bed[];
 }
 
 interface Flat {
-  id: string;
-  flatNo: string;
-  type: string;
-  fullFlatRent: number;
+  id: string | number;
+  flatId?: string | number;
+  apartmentName: string;
+  flatNumber: string;
+  pricingType: string;
+  totalFlatExpectedRent?: number;
+  totalBeds?: number;
+  vacantBeds?: number;
+  totalRooms?: number;
   isOccupied?: boolean;
-  rooms: Room[];
+  status?: number;
+  tenantName?: string;
+  currentTenant?: string;
+  zones?: Room[];
+  roomBreakup?: Room[];
 }
 
-interface Property {
-  id: string;
-  name: string;
-  flats: Flat[];
-}
+// 🛠️ Safe entity ID comparison helper to eliminate type mismatch bugs
+const areEntitiesEqual = (id1: any, id2: any): boolean => {
+  if (id1 === undefined || id1 === null || id2 === undefined || id2 === null)
+    return false;
+  return String(id1) === String(id2);
+};
+
+const getEntityId = (item: any): string => {
+  if (!item) return "";
+  const candidates = [
+    item.id,
+    item.zoneId,
+    item.roomId,
+    item.bedId,
+    item.flatId,
+    item.uuid,
+    item._id,
+  ];
+  for (const cand of candidates) {
+    if (cand !== undefined && cand !== null && cand !== "") {
+      return String(cand);
+    }
+  }
+  return "";
+};
 
 export default function AddTenantScreen() {
+  const params = useLocalSearchParams();
+
+  // Edit Mode Checking
+  const isEditing = params.isEditing === "true";
+  const parsedTenantData = useMemo(() => {
+    if (params.tenantData && typeof params.tenantData === "string") {
+      try {
+        return JSON.parse(params.tenantData);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }, [params]);
+
+  // Current Tenant's existing bed ID for edit mode validation bypass
+  const currentTenantBedId = isEditing ? parsedTenantData?.bedId : null;
+
+  // Tenant Details
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [emergencyPhone, setEmergencyPhone] = useState("");
+
+  // Financial & Lease Details
   const [deposit, setDeposit] = useState("");
   const [advancePaid, setAdvancePaid] = useState("");
-  const [dueDate] = useState("5");
-  const [lockInPeriodMonths, setLockInPeriodMonths] = useState("6");
+  const [dueDate, setDueDate] = useState("5");
   const [startingMeterReading, setStartingMeterReading] = useState("");
+  const [lockInPeriodMonths, setLockInPeriodMonths] = useState("6");
+  const [paymentMethod, setPaymentMethod] = useState("UPI");
+
+  // ID & Verification Details
   const [idProofType, setIdProofType] = useState("AADHAAR");
   const [idProofNumber, setIdProofNumber] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("UPI");
+  const [policeVerificationStatus, setPoliceVerificationStatus] =
+    useState<PoliceVerificationStatus>("NOT_STARTED");
+
   const [loading, setLoading] = useState(false);
 
-  // Dynamic Properties & Flats State
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [loadingProperties, setLoadingProperties] = useState(false);
+  // Flats State
+  const [flats, setFlats] = useState<Flat[]>([]);
+  const [loadingFlats, setLoadingFlats] = useState(false);
 
-  // Selection Hierarchy States
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(
-    null,
-  );
+  // Selection States
   const [selectedFlat, setSelectedFlat] = useState<Flat | null>(null);
   const [allocationType, setAllocationType] =
     useState<AllocationType>("FULL_FLAT");
@@ -93,15 +172,141 @@ export default function AddTenantScreen() {
   const [idProof, setIdProof] = useState<Attachment | null>(null);
   const [tenantPhoto, setTenantPhoto] = useState<Attachment | null>(null);
 
-  // Fetch Properties, Flats, Rooms & Beds on Mount
   useEffect(() => {
-    fetchPropertiesData();
+    fetchFlatsData();
+
+    if (isEditing && parsedTenantData) {
+      setName(parsedTenantData.name || "");
+      setPhone(parsedTenantData.phone || "");
+      setEmail(parsedTenantData.email || "");
+      setEmergencyPhone(parsedTenantData.emergencyPhone || "");
+      setDeposit(
+        parsedTenantData.deposit ? String(parsedTenantData.deposit) : "",
+      );
+      setAdvancePaid(
+        parsedTenantData.advancePaid
+          ? String(parsedTenantData.advancePaid)
+          : "",
+      );
+      setDueDate(
+        parsedTenantData.dueDate ? String(parsedTenantData.dueDate) : "5",
+      );
+      setStartingMeterReading(
+        parsedTenantData.startingMeterReading
+          ? String(parsedTenantData.startingMeterReading)
+          : "",
+      );
+      setLockInPeriodMonths(
+        parsedTenantData.lockInPeriodMonths
+          ? String(parsedTenantData.lockInPeriodMonths)
+          : "6",
+      );
+      setPaymentMethod(parsedTenantData.paymentMethod || "UPI");
+      setIdProofType(parsedTenantData.idProofType || "AADHAAR");
+      setIdProofNumber(parsedTenantData.idProofNumber || "");
+      setPoliceVerificationStatus(
+        parsedTenantData.policeVerificationStatus || "NOT_STARTED",
+      );
+
+      const typeMapping: Record<number, AllocationType> = {
+        1: "FULL_FLAT",
+        2: "ROOM",
+        3: "BED",
+      };
+      if (parsedTenantData.allocationType) {
+        setAllocationType(
+          typeMapping[parsedTenantData.allocationType] || "FULL_FLAT",
+        );
+      }
+    }
   }, []);
 
-  // Fetch Flats Data on Mount
-  const fetchPropertiesData = async () => {
+  // =========================================================
+  // BOOKING / AVAILABILITY HELPERS
+  // =========================================================
+
+  const isBedOccupied = (bed: Bed): boolean => {
+    // Agar ye wahi bed hai jo is tenant ke paas pehle se allocated tha, toh occupied mat maano
+    if (currentTenantBedId && areEntitiesEqual(bed.id || bed.bedId, currentTenantBedId)) {
+      return false;
+    }
+    return bed.isOccupied === true || bed.status === 2;
+  };
+
+  const getRoomBeds = (room: Room | null): Bed[] => {
+    if (!room) return [];
+
+    const actualBeds =
+      room.beds || room.bedBreakup || room.zoneBeds || room.roomBeds || [];
+
+    if (actualBeds.length > 0) {
+      return actualBeds.map((bed, index) => ({
+        ...bed,
+        id: bed.id ?? bed.bedId ?? index + 1,
+      }));
+    }
+
+    if (room.capacity && room.capacity > 0) {
+      const perBedRent = Math.round(
+        (room.roomRent || room.rent || 0) / room.capacity,
+      );
+
+      return Array.from({ length: room.capacity }, (_, index) => ({
+        id: index + 1,
+        bedId: index + 1,
+        bedNumber: `Bed ${index + 1}`,
+        bedRent: perBedRent,
+        isOccupied: false,
+      }));
+    }
+
+    return [];
+  };
+
+  const isRoomFullyBooked = (room: Room): boolean => {
+    const beds = getRoomBeds(room);
+    if (room.isOccupied === true || room.status === 2) return true;
+    if (beds.length === 0) return false;
+    return beds.every(isBedOccupied);
+  };
+
+  const isRoomPartiallyBooked = (room: Room): boolean => {
+    const beds = getRoomBeds(room);
+    if (beds.length === 0) return false;
+    const occupiedCount = beds.filter(isBedOccupied).length;
+    return occupiedCount > 0 && occupiedCount < beds.length;
+  };
+
+  const getAvailableBedCount = (room: Room): number => {
+    return getRoomBeds(room).filter((bed) => !isBedOccupied(bed)).length;
+  };
+
+  const isFlatFullyBooked = (flat: Flat): boolean => {
+    const rooms = flat.roomBreakup || flat.zones || [];
+    if (rooms.length === 0) return false;
+    return rooms.every((room) => isRoomFullyBooked(room));
+  };
+
+  const isFlatPartiallyOrFullyBooked = (flat: Flat): boolean => {
+    const rooms = flat.roomBreakup || flat.zones || [];
+    return rooms.some((room) => {
+      if (room.isOccupied === true || room.status === 2) return true;
+      return getRoomBeds(room).some(isBedOccupied);
+    });
+  };
+
+  const getAvailableRooms = (flat: Flat | null): Room[] => {
+    if (!flat) return [];
+    const rawRooms = flat.roomBreakup || flat.zones || [];
+    return rawRooms.map((room, index) => ({
+      ...room,
+      id: room.id || room.zoneId || room.roomId || index + 1,
+    }));
+  };
+
+  const fetchFlatsData = async () => {
     try {
-      setLoadingProperties(true);
+      setLoadingFlats(true);
       const storedUserId = await AsyncStorage.getItem("userId");
 
       if (!storedUserId) {
@@ -112,55 +317,102 @@ export default function AddTenantScreen() {
         return;
       }
 
-      // Swagger ke mutabiq correct endpoint
       const response = await api.get(`/Flats/user/${storedUserId}`);
       const responseData = response.data;
-
-      const flatList = Array.isArray(responseData)
+      const flatList: Flat[] = Array.isArray(responseData)
         ? responseData
-        : responseData?.flats || responseData?.data || [];
+        : responseData?.data || [];
 
-      // Agar aapka backend direct flats ki list deta hai
-      setProperties(flatList); // Yahan state variable ko flats ke hisaab se map kar sakte hain
+      setFlats(flatList);
+
       if (flatList.length > 0) {
-        setSelectedFlat(flatList[0]); // Seedha flat select ho jayega
+        let targetFlat = flatList[0];
+
+        // 1. Handle Flat Selection in Edit Mode
+        if (isEditing && parsedTenantData?.flatId) {
+          const matched = flatList.find((f) =>
+            areEntitiesEqual(f.id || f.flatId, parsedTenantData.flatId),
+          );
+          if (matched) targetFlat = matched;
+        } else {
+          targetFlat =
+            flatList.find((f) => !isFlatFullyBooked(f)) || flatList[0];
+        }
+
+        setSelectedFlat(targetFlat);
+
+        // 2. Handle Allocation Type properly for Edit Mode vs Normal Mode
+        if (isEditing && parsedTenantData?.allocationType) {
+          const rawType = parsedTenantData.allocationType;
+          let resolvedType: AllocationType = "FULL_FLAT";
+
+          if (rawType === 1 || rawType === "1" || rawType === "FULL_FLAT") {
+            resolvedType = "FULL_FLAT";
+          } else if (rawType === 2 || rawType === "2" || rawType === "ROOM") {
+            resolvedType = "ROOM";
+          } else if (rawType === 3 || rawType === "3" || rawType === "BED") {
+            resolvedType = "BED";
+          }
+          setAllocationType(resolvedType);
+        } else {
+          const flatHasOccupiedUnit = isFlatPartiallyOrFullyBooked(targetFlat);
+          setAllocationType(flatHasOccupiedUnit ? "BED" : "FULL_FLAT");
+        }
+
+        // 3. Handle Room Selection
+        const rooms = getAvailableRooms(targetFlat);
+        if (rooms.length > 0) {
+          let targetRoom = rooms[0];
+          if (isEditing && parsedTenantData?.roomId) {
+            const matchedRoom = rooms.find((r) =>
+              areEntitiesEqual(
+                r.id || r.zoneId || r.roomId,
+                parsedTenantData.roomId,
+              ),
+            );
+            if (matchedRoom) targetRoom = matchedRoom;
+          } else {
+            targetRoom =
+              rooms.find((room) => !isRoomFullyBooked(room)) || rooms[0];
+          }
+          setSelectedRoom(targetRoom);
+
+          // 4. Handle Bed Selection
+          if (isEditing && parsedTenantData?.bedId) {
+            const beds = getRoomBeds(targetRoom);
+            const matchedBed = beds.find((b) =>
+              areEntitiesEqual(b.id || b.bedId, parsedTenantData.bedId),
+            );
+            if (matchedBed) setSelectedBed(matchedBed);
+          }
+        }
       }
     } catch (error: any) {
-      console.error("Error fetching flats:", error?.message);
-      setProperties([]);
+      console.error("🔴 [ERROR FETCHING FLATS]:", error?.message);
+      setFlats([]);
     } finally {
-      setLoadingProperties(false);
+      setLoadingFlats(false);
     }
   };
 
   const handleIdProofPick = () => {
-    Alert.alert(
-      "Upload ID Proof",
-      "Choose document type or photo source",
-      [
-        { text: "Take Photo", onPress: () => openCamera("idProof") },
-        {
-          text: "Choose Photo from Gallery",
-          onPress: () => openGallery("idProof"),
-        },
-        { text: "Upload CAN / PDF File", onPress: pickDocument },
-        { text: "Cancel", style: "cancel" },
-      ],
-      { cancelable: true },
-    );
+    Alert.alert("Upload ID Proof", "Choose document type or photo source", [
+      { text: "Take Photo", onPress: () => openCamera("idProof") },
+      {
+        text: "Choose Photo from Gallery",
+        onPress: () => openGallery("idProof"),
+      },
+      { text: "Upload File", onPress: pickDocument },
+      { text: "Cancel", style: "cancel" },
+    ]);
   };
 
   const handlePhotoPick = () => {
-    Alert.alert(
-      "Upload Tenant Photo",
-      "Choose photo source",
-      [
-        { text: "Take Photo", onPress: () => openCamera("photo") },
-        { text: "Choose from Gallery", onPress: () => openGallery("photo") },
-        { text: "Cancel", style: "cancel" },
-      ],
-      { cancelable: true },
-    );
+    Alert.alert("Upload Tenant Photo", "Choose photo source", [
+      { text: "Take Photo", onPress: () => openCamera("photo") },
+      { text: "Choose from Gallery", onPress: () => openGallery("photo") },
+      { text: "Cancel", style: "cancel" },
+    ]);
   };
 
   const pickDocument = async () => {
@@ -230,14 +482,17 @@ export default function AddTenantScreen() {
   };
 
   const getCalculatedRent = (): number => {
+    let calculated = 0;
     if (allocationType === "FULL_FLAT" && selectedFlat)
-      return selectedFlat.fullFlatRent;
-    if (allocationType === "ROOM" && selectedRoom) return selectedRoom.rent;
-    if (allocationType === "BED" && selectedBed) return selectedBed.rent;
-    return 0;
+      calculated = selectedFlat.totalFlatExpectedRent || 0;
+    else if (allocationType === "ROOM" && selectedRoom)
+      calculated = selectedRoom.roomRent || selectedRoom.rent || 0;
+    else if (allocationType === "BED" && selectedBed)
+      calculated = selectedBed.bedRent || selectedBed.rent || 0;
+    return calculated;
   };
 
-  const handleCreateTenant = async () => {
+  const handleCreateOrUpdateTenant = async () => {
     if (!name.trim()) {
       Alert.alert("Validation Error", "Please enter tenant name.");
       return;
@@ -246,17 +501,29 @@ export default function AddTenantScreen() {
       Alert.alert("Validation Error", "Please enter a valid phone number.");
       return;
     }
-    if (!selectedProperty || !selectedFlat) {
-      Alert.alert("Allocation Required", "Please select a property and flat.");
+    if (!selectedFlat) {
+      Alert.alert("Allocation Required", "Please select a flat.");
       return;
     }
+
     if (allocationType === "ROOM" && !selectedRoom) {
-      Alert.alert("Allocation Required", "Please select a room.");
+      Alert.alert("Room Required", "Please select a room for room allocation.");
       return;
     }
-    if (allocationType === "BED" && (!selectedRoom || !selectedBed)) {
-      Alert.alert("Allocation Required", "Please select a room and bed.");
-      return;
+
+    if (allocationType === "BED") {
+      if (!selectedRoom) {
+        Alert.alert("Room Required", "Please select a room.");
+        return;
+      }
+      if (!selectedBed) {
+        Alert.alert("Bed Required", "Please select an available bed.");
+        return;
+      }
+      if (isBedOccupied(selectedBed)) {
+        Alert.alert("Bed Not Available", "This bed is already booked.");
+        return;
+      }
     }
 
     setLoading(true);
@@ -280,15 +547,31 @@ export default function AddTenantScreen() {
         }
       };
 
+      const parseId = (value: any) => {
+        if (value === null || value === undefined) return null;
+        const parsed = Number(value);
+        return isNaN(parsed) ? value : parsed;
+      };
+
       const tenantPayload: CreateTenantPayload = {
         name: name.trim(),
         email: email.trim(),
         phone: phone.trim(),
         emergencyPhone: emergencyPhone.trim(),
-        propertyId: Number(selectedProperty.id) || 1,
-        flatId: selectedFlat.id,
-        roomId: selectedRoom ? selectedRoom.id : null,
-        bedId: selectedBed ? selectedBed.id : null,
+        propertyId: 1,
+        flatId: parseId(selectedFlat?.id ?? selectedFlat?.flatId)!,
+        roomId:
+          allocationType === "FULL_FLAT"
+            ? null
+            : parseId(
+                selectedRoom?.id ??
+                  selectedRoom?.zoneId ??
+                  selectedRoom?.roomId,
+              ),
+        bedId:
+          allocationType === "BED"
+            ? parseId(selectedBed?.id ?? selectedBed?.bedId)
+            : null,
         allocationType: getAllocationTypeCode(allocationType),
         rent: getCalculatedRent(),
         deposit: Number(deposit) || 0,
@@ -301,17 +584,24 @@ export default function AddTenantScreen() {
         agreementEndDate: agreementEndDate.toISOString(),
         idProofType: idProofType,
         idProofNumber: idProofNumber.trim(),
-        policeVerificationStatus: "NOT_STARTED",
+        policeVerificationStatus: policeVerificationStatus,
         status: 1,
       };
 
-      await createTenantApi(tenantPayload, idProof, tenantPhoto);
-
-      Alert.alert("Success", "Tenant added successfully!", [
-        { text: "OK", onPress: () => router.back() },
-      ]);
+      if (isEditing) {
+        const tenantId = parsedTenantData?.id || parsedTenantData?._id;
+        await updateTenantApi(tenantId, tenantPayload, idProof, tenantPhoto);
+        Alert.alert("Success", "Tenant updated successfully!", [
+          { text: "OK", onPress: () => router.back() },
+        ]);
+      } else {
+        await createTenantApi(tenantPayload, idProof, tenantPhoto);
+        Alert.alert("Success", "Tenant added successfully!", [
+          { text: "OK", onPress: () => router.back() },
+        ]);
+      }
     } catch (error: any) {
-      console.error(error);
+      console.error("🔴 [ERROR]:", error);
       const msg =
         error?.response?.data?.message || "Failed to save tenant information.";
       Alert.alert("Error", msg);
@@ -320,11 +610,17 @@ export default function AddTenantScreen() {
     }
   };
 
+  const currentRooms = useMemo(
+    () => getAvailableRooms(selectedFlat),
+    [selectedFlat],
+  );
+  const currentBeds = useMemo(() => getRoomBeds(selectedRoom), [selectedRoom]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
 
-      {/* Fixed Header Bar */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
@@ -333,22 +629,21 @@ export default function AddTenantScreen() {
         >
           <Ionicons name="arrow-back" size={22} color={COLORS.textPrimary} />
         </TouchableOpacity>
-
         <View style={styles.titleContainer}>
-          <Text style={TYPOGRAPHY.headerTitle}>Add New Tenant</Text>
+          <Text style={TYPOGRAPHY.headerTitle}>
+            {isEditing ? "Edit Tenant" : "Add New Tenant"}
+          </Text>
         </View>
-
         <View style={styles.headerRightPlaceholder} />
       </View>
 
-      {/* Scrollable Form Body */}
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Basic Info Section */}
+        {/* Basic Information */}
         <Text style={styles.sectionHeader}>Basic Information</Text>
         <View style={styles.sectionCard}>
           <View style={styles.inputGroup}>
@@ -375,6 +670,18 @@ export default function AddTenantScreen() {
             />
           </View>
 
+          <View style={styles.inputGroup}>
+            <Text style={TYPOGRAPHY.label}>Email Address</Text>
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              style={commonStyles.input}
+              placeholder="e.g. rahul@example.com"
+              placeholderTextColor={COLORS.textMuted}
+            />
+          </View>
+
           <View style={styles.inputGroupLast}>
             <Text style={TYPOGRAPHY.label}>Emergency Contact (Optional)</Text>
             <TextInput
@@ -389,121 +696,122 @@ export default function AddTenantScreen() {
           </View>
         </View>
 
-        {/* Property & Flat Allocation */}
-        <Text style={styles.sectionHeader}>Property & Flat Allocation</Text>
-
+        {/* Flat Allocation */}
+        <Text style={styles.sectionHeader}>Flat Allocation</Text>
         <View style={styles.sectionCard}>
-          <Text style={TYPOGRAPHY.label}>Select Property</Text>
-          {loadingProperties ? (
-            <Text style={styles.subText}>Loading properties...</Text>
-          ) : properties.length === 0 ? (
-            <Text style={styles.subText}>No properties found.</Text>
+          <Text style={TYPOGRAPHY.label}>Select Flat / Apartment</Text>
+          {loadingFlats ? (
+            <Text style={styles.subText}>Loading flats...</Text>
+          ) : flats.length === 0 ? (
+            <Text style={styles.subText}>No flats found.</Text>
           ) : (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               style={styles.horizontalScroll}
             >
-              {properties.map((prop) => {
-                const isSelected = selectedProperty?.id === prop.id;
+              {flats.map((flat, index) => {
+                const flatId = getEntityId(flat) || `flat-${index}`;
+                const isSelected = areEntitiesEqual(
+                  selectedFlat?.id || selectedFlat?.flatId,
+                  flat.id || flat.flatId,
+                );
+                const isBooked = isFlatFullyBooked(flat);
+                const tenantLabel = flat.tenantName || flat.currentTenant;
+
                 return (
                   <TouchableOpacity
-                    key={prop.id}
-                    style={[styles.chip, isSelected && styles.chipSelected]}
+                    key={flatId}
+                    disabled={isBooked}
+                    style={[
+                      styles.chip,
+                      isSelected && styles.chipSelected,
+                      isBooked && styles.disabledCard,
+                    ]}
                     onPress={() => {
-                      setSelectedProperty(prop);
-                      setSelectedFlat(null);
-                      setSelectedRoom(null);
-                      setSelectedBed(null);
+                      if (!isBooked) {
+                        setSelectedFlat(flat);
+                        const flatHasOccupiedUnit =
+                          isFlatPartiallyOrFullyBooked(flat);
+                        setAllocationType(
+                          flatHasOccupiedUnit ? "BED" : "FULL_FLAT",
+                        );
+
+                        const rooms = getAvailableRooms(flat);
+                        if (rooms.length > 0) {
+                          const firstAvailableRoom =
+                            rooms.find((room) => !isRoomFullyBooked(room)) ||
+                            rooms[0];
+                          setSelectedRoom(firstAvailableRoom);
+                        } else {
+                          setSelectedRoom(null);
+                        }
+                        setSelectedBed(null);
+                      }
                     }}
                   >
                     <Ionicons
                       name="business-outline"
                       size={16}
                       color={
-                        isSelected ? COLORS.textWhite : COLORS.textSecondary
+                        isBooked
+                          ? COLORS.textMuted
+                          : isSelected
+                            ? COLORS.textWhite
+                            : COLORS.textSecondary
                       }
                     />
-                    <Text
-                      style={[
-                        styles.chipText,
-                        isSelected && styles.chipTextSelected,
-                      ]}
-                    >
-                      {prop.name}
-                    </Text>
+                    <View>
+                      <Text
+                        style={[
+                          styles.chipText,
+                          isSelected && styles.chipTextSelected,
+                          isBooked && styles.disabledText,
+                        ]}
+                      >
+                        {`${flat.apartmentName} (${flat.flatNumber})`}
+                      </Text>
+                      {isBooked && (
+                        <Text style={styles.chipBookedSub}>
+                          {tenantLabel
+                            ? `Booked: ${tenantLabel}`
+                            : "Fully Booked"}
+                        </Text>
+                      )}
+                    </View>
                   </TouchableOpacity>
                 );
               })}
             </ScrollView>
           )}
 
-          <Text style={TYPOGRAPHY.label}>Select Flat</Text>
-          {selectedProperty && selectedProperty.flats ? (
-            <View style={{ gap: SPACING.xs }}>
-              {selectedProperty.flats.map((flat) => {
-                const isSelected = selectedFlat?.id === flat.id;
-                return (
+          {/* Allocation Type Switch */}
+          {selectedFlat && !isFlatFullyBooked(selectedFlat) && (
+            <View style={{ marginTop: SPACING.md }}>
+              <Text style={TYPOGRAPHY.label}>Allocation Type</Text>
+              <View style={styles.tabContainer}>
+                {!isFlatPartiallyOrFullyBooked(selectedFlat) && (
                   <TouchableOpacity
-                    key={flat.id}
-                    disabled={flat.isOccupied}
                     style={[
-                      styles.flatCard,
-                      isSelected && styles.selectedBorder,
-                      flat.isOccupied && styles.disabledCard,
+                      styles.tabButton,
+                      allocationType === "FULL_FLAT" && styles.activeTab,
                     ]}
                     onPress={() => {
-                      setSelectedFlat(flat);
+                      setAllocationType("FULL_FLAT");
                       setSelectedRoom(null);
                       setSelectedBed(null);
                     }}
                   >
-                    <View style={styles.flatHeader}>
-                      <Text style={styles.flatTitle}>
-                        {flat.flatNo} ({flat.type})
-                      </Text>
-                      <Text style={styles.badgeText}>
-                        ₹{flat.fullFlatRent}/mo
-                      </Text>
-                    </View>
-                    <Text style={styles.subText}>
-                      {flat.isOccupied
-                        ? "Status: Occupied"
-                        : "Status: Available"}
+                    <Text
+                      style={[
+                        styles.tabText,
+                        allocationType === "FULL_FLAT" && styles.activeTabText,
+                      ]}
+                    >
+                      Full Flat
                     </Text>
                   </TouchableOpacity>
-                );
-              })}
-            </View>
-          ) : (
-            <Text style={styles.subText}>Please select a property first.</Text>
-          )}
-
-          {/* Allocation Type Selection */}
-          {selectedFlat && (
-            <View style={{ marginTop: SPACING.md }}>
-              <Text style={TYPOGRAPHY.label}>Allocation Type</Text>
-              <View style={styles.tabContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.tabButton,
-                    allocationType === "FULL_FLAT" && styles.activeTab,
-                  ]}
-                  onPress={() => {
-                    setAllocationType("FULL_FLAT");
-                    setSelectedRoom(null);
-                    setSelectedBed(null);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.tabText,
-                      allocationType === "FULL_FLAT" && styles.activeTabText,
-                    ]}
-                  >
-                    Full Flat
-                  </Text>
-                </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
                   style={[
@@ -521,7 +829,7 @@ export default function AddTenantScreen() {
                       allocationType === "ROOM" && styles.activeTabText,
                     ]}
                   >
-                    Single Room
+                    Full Room
                   </Text>
                 </TouchableOpacity>
 
@@ -551,38 +859,96 @@ export default function AddTenantScreen() {
               <View style={{ marginTop: SPACING.sm }}>
                 <Text style={TYPOGRAPHY.label}>Select Room</Text>
                 <View style={{ gap: SPACING.xs }}>
-                  {selectedFlat.rooms?.map((room) => {
-                    const isSelected = selectedRoom?.id === room.id;
-                    return (
-                      <TouchableOpacity
-                        key={room.id}
-                        disabled={room.isOccupied}
-                        style={[
-                          styles.selectableCard,
-                          isSelected && styles.selectedBorder,
-                          room.isOccupied && styles.disabledCard,
-                        ]}
-                        onPress={() => {
-                          setSelectedRoom(room);
-                          setSelectedBed(null);
-                        }}
-                      >
-                        <View>
-                          <Text style={styles.itemTitle}>{room.roomName}</Text>
-                          <Text style={styles.subText}>
-                            Rent: ₹{room.rent}/month
-                          </Text>
-                        </View>
-                        {isSelected && (
-                          <Ionicons
-                            name="checkmark-circle"
-                            size={22}
-                            color={COLORS.accent}
-                          />
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
+                  {currentRooms.length === 0 ? (
+                    <Text style={styles.subText}>
+                      No rooms available in this flat.
+                    </Text>
+                  ) : (
+                    currentRooms.map((room, roomIndex) => {
+                      const roomKey = getEntityId(room) || `room-${roomIndex}`;
+                      const roomName =
+                        room.zoneName ||
+                        room.roomName ||
+                        room.name ||
+                        `Room ${roomIndex + 1}`;
+
+                      const isSelected = areEntitiesEqual(
+                        selectedRoom?.id ||
+                          selectedRoom?.zoneId ||
+                          selectedRoom?.roomId,
+                        room.id || room.zoneId || room.roomId,
+                      );
+                      const roomRent = room.roomRent || room.rent || 0;
+                      const isOccupied = isRoomFullyBooked(room);
+                      const isPartiallyBooked = isRoomPartiallyBooked(room);
+                      const availableBedCount = getAvailableBedCount(room);
+                      const tenantLabel = room.tenantName || room.currentTenant;
+
+                      return (
+                        <TouchableOpacity
+                          key={roomKey}
+                          disabled={isOccupied}
+                          style={[
+                            styles.selectableCard,
+                            isSelected && styles.selectedBorder,
+                            isOccupied && styles.disabledCard,
+                          ]}
+                          onPress={() => {
+                            if (!isOccupied) {
+                              setSelectedRoom(room);
+                              setSelectedBed(null);
+                            }
+                          }}
+                        >
+                          <View style={styles.cardInfoContainer}>
+                            <Text
+                              style={[
+                                styles.itemTitle,
+                                isOccupied && styles.disabledText,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {roomName}
+                            </Text>
+                            <Text style={styles.subText} numberOfLines={1}>
+                              Rent: ₹{roomRent}/mo | Capacity:{" "}
+                              {room.capacity || "N/A"}
+                            </Text>
+                            {isOccupied ? (
+                              <Text
+                                style={styles.occupiedByText}
+                                numberOfLines={1}
+                              >
+                                {tenantLabel
+                                  ? `Booked by: ${tenantLabel}`
+                                  : "Room Fully Booked"}
+                              </Text>
+                            ) : isPartiallyBooked ? (
+                              <Text style={styles.availableSubText}>
+                                {availableBedCount} bed
+                                {availableBedCount !== 1 ? "s" : ""} available
+                              </Text>
+                            ) : null}
+                          </View>
+                          <View style={styles.cardActionContainer}>
+                            {isOccupied ? (
+                              <Text style={styles.occupiedText}>
+                                Fully Booked
+                              </Text>
+                            ) : isSelected ? (
+                              <Ionicons
+                                name="checkmark-circle"
+                                size={22}
+                                color={COLORS.accent}
+                              />
+                            ) : (
+                              <Text style={styles.vacantText}>Select</Text>
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })
+                  )}
                 </View>
               </View>
             )}
@@ -591,52 +957,91 @@ export default function AddTenantScreen() {
           {selectedRoom && allocationType === "BED" && (
             <View style={{ marginTop: SPACING.sm }}>
               <Text style={TYPOGRAPHY.label}>
-                Select Bed in {selectedRoom.roomName}
+                Select Bed in{" "}
+                {selectedRoom.zoneName || selectedRoom.roomName || "Room"}
               </Text>
-              <View style={{ gap: SPACING.xs }}>
-                {selectedRoom.beds?.map((bed) => {
-                  const isSelected = selectedBed?.id === bed.id;
-                  return (
-                    <TouchableOpacity
-                      key={bed.id}
-                      disabled={bed.isOccupied}
-                      style={[
-                        styles.selectableCard,
-                        isSelected && styles.selectedSuccessBorder,
-                        bed.isOccupied && styles.disabledCard,
-                      ]}
-                      onPress={() => setSelectedBed(bed)}
-                    >
-                      <View>
-                        <Text style={styles.itemTitle}>{bed.bedNo}</Text>
-                        <Text style={styles.subText}>₹{bed.rent} / month</Text>
-                      </View>
 
-                      {bed.isOccupied ? (
-                        <Text style={styles.occupiedText}>Occupied</Text>
-                      ) : isSelected ? (
-                        <Ionicons
-                          name="checkmark-circle"
-                          size={22}
-                          color={COLORS.success}
-                        />
-                      ) : (
-                        <Ionicons
-                          name="ellipse-outline"
-                          size={22}
-                          color={COLORS.textMuted}
-                        />
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+              <ScrollView
+                style={styles.bedsScrollContainer}
+                contentContainerStyle={{ gap: SPACING.xs }}
+                showsVerticalScrollIndicator={false}
+              >
+                {currentBeds.length === 0 ? (
+                  <Text style={styles.subText}>
+                    No beds available in this room.
+                  </Text>
+                ) : (
+                  currentBeds.map((bed, bedIndex) => {
+                    const bedKey = getEntityId(bed) || `bed-${bedIndex}`;
+                    const isSelected = areEntitiesEqual(
+                      selectedBed?.id || selectedBed?.bedId,
+                      bed.id || bed.bedId,
+                    );
+                    const bedName =
+                      bed.bedNumber || bed.bedNo || `Bed ${bedIndex + 1}`;
+                    const bedRent = bed.bedRent || bed.rent || 0;
+                    const isOccupied = isBedOccupied(bed);
+                    const tenantLabel = bed.tenantName || bed.currentTenant;
+
+                    return (
+                      <TouchableOpacity
+                        key={bedKey}
+                        disabled={isOccupied}
+                        style={[
+                          styles.selectableCard,
+                          isSelected && styles.selectedSuccessBorder,
+                          isOccupied && styles.disabledCard,
+                        ]}
+                        onPress={() => {
+                          if (!isOccupied) setSelectedBed(bed);
+                        }}
+                      >
+                        <View style={styles.cardInfoContainer}>
+                          <Text
+                            style={[
+                              styles.itemTitle,
+                              isOccupied && styles.disabledText,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {bedName}
+                          </Text>
+                          <Text style={styles.subText} numberOfLines={1}>
+                            ₹{bedRent} / month
+                          </Text>
+                          {isOccupied && tenantLabel ? (
+                            <Text
+                              style={styles.occupiedByText}
+                              numberOfLines={1}
+                            >
+                              Booked by: {tenantLabel}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <View style={styles.cardActionContainer}>
+                          {isOccupied ? (
+                            <Text style={styles.occupiedText}>Booked</Text>
+                          ) : isSelected ? (
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={22}
+                              color={COLORS.success}
+                            />
+                          ) : (
+                            <Text style={styles.vacantText}>Select</Text>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </ScrollView>
             </View>
           )}
         </View>
 
-        {/* Financial Info */}
-        <Text style={styles.sectionHeader}>Financial Setup</Text>
+        {/* Financial Details */}
+        <Text style={styles.sectionHeader}>Financial & Agreement Details</Text>
         <View style={styles.sectionCard}>
           <View style={styles.inputGroup}>
             <Text style={TYPOGRAPHY.label}>Security Deposit (₹)</Text>
@@ -650,12 +1055,84 @@ export default function AddTenantScreen() {
             />
           </View>
 
+          <View style={styles.inputGroup}>
+            <Text style={TYPOGRAPHY.label}>Advance Paid (₹)</Text>
+            <TextInput
+              value={advancePaid}
+              onChangeText={setAdvancePaid}
+              keyboardType="number-pad"
+              style={commonStyles.input}
+              placeholder="e.g. 12000"
+              placeholderTextColor={COLORS.textMuted}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={TYPOGRAPHY.label}>Due Date Day of Month (1-30)</Text>
+            <TextInput
+              value={dueDate}
+              onChangeText={setDueDate}
+              keyboardType="number-pad"
+              maxLength={2}
+              style={commonStyles.input}
+              placeholder="e.g. 5"
+              placeholderTextColor={COLORS.textMuted}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={TYPOGRAPHY.label}>Starting Meter Reading (kWh)</Text>
+            <TextInput
+              value={startingMeterReading}
+              onChangeText={setStartingMeterReading}
+              keyboardType="numeric"
+              style={commonStyles.input}
+              placeholder="e.g. 120.5"
+              placeholderTextColor={COLORS.textMuted}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={TYPOGRAPHY.label}>Lock-in Period (Months)</Text>
+            <TextInput
+              value={lockInPeriodMonths}
+              onChangeText={setLockInPeriodMonths}
+              keyboardType="number-pad"
+              style={commonStyles.input}
+              placeholder="e.g. 6"
+              placeholderTextColor={COLORS.textMuted}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={TYPOGRAPHY.label}>Payment Method</Text>
+            <View style={styles.tabContainer}>
+              {["UPI", "CASH", "BANK_TRANSFER"].map((method) => (
+                <TouchableOpacity
+                  key={method}
+                  style={[
+                    styles.tabButton,
+                    paymentMethod === method && styles.activeTab,
+                  ]}
+                  onPress={() => setPaymentMethod(method)}
+                >
+                  <Text
+                    style={[
+                      styles.tabText,
+                      paymentMethod === method && styles.activeTabText,
+                    ]}
+                  >
+                    {method.replace("_", " ")}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
           <View style={styles.rentSummary}>
             <View>
               <Text style={styles.rentSummaryLabel}>Calculated Rent</Text>
-              <Text style={styles.rentSummarySub}>
-                Based on current selection
-              </Text>
+              <Text style={styles.rentSummarySub}>Based on selection</Text>
             </View>
             <Text style={styles.rentSummaryValue}>
               ₹{getCalculatedRent()}/mo
@@ -663,8 +1140,84 @@ export default function AddTenantScreen() {
           </View>
         </View>
 
+        {/* Identity Details */}
+        <Text style={styles.sectionHeader}>Identity Details</Text>
+        <View style={styles.sectionCard}>
+          <View style={styles.inputGroup}>
+            <Text style={TYPOGRAPHY.label}>ID Proof Type</Text>
+            <View style={styles.tabContainer}>
+              {["AADHAAR", "PAN", "PASSPORT"].map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.tabButton,
+                    idProofType === type && styles.activeTab,
+                  ]}
+                  onPress={() => setIdProofType(type)}
+                >
+                  <Text
+                    style={[
+                      styles.tabText,
+                      idProofType === type && styles.activeTabText,
+                    ]}
+                  >
+                    {type}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.inputGroupLast}>
+            <Text style={TYPOGRAPHY.label}>ID Proof Number</Text>
+            <TextInput
+              value={idProofNumber}
+              onChangeText={setIdProofNumber}
+              style={commonStyles.input}
+              placeholder="e.g. ID Document Number"
+              placeholderTextColor={COLORS.textMuted}
+            />
+          </View>
+        </View>
+
+        {/* Police Verification */}
+        <Text style={styles.sectionHeader}>Police Verification</Text>
+        <View style={styles.sectionCard}>
+          <Text style={TYPOGRAPHY.label}>Verification Status</Text>
+          <View style={styles.tabContainer}>
+            {[
+              { label: "Not Started", value: "NOT_STARTED" },
+              { label: "In Progress", value: "IN_PROGRESS" },
+              { label: "Verified", value: "VERIFIED" },
+            ].map((item) => (
+              <TouchableOpacity
+                key={item.value}
+                style={[
+                  styles.tabButton,
+                  policeVerificationStatus === item.value && styles.activeTab,
+                ]}
+                onPress={() =>
+                  setPoliceVerificationStatus(
+                    item.value as PoliceVerificationStatus,
+                  )
+                }
+              >
+                <Text
+                  style={[
+                    styles.tabText,
+                    policeVerificationStatus === item.value &&
+                      styles.activeTabText,
+                  ]}
+                >
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
         {/* Document Uploads */}
-        <Text style={styles.sectionHeader}>Documents & Proofs</Text>
+        <Text style={styles.sectionHeader}>Documents & Photos</Text>
         <View style={commonStyles.row}>
           <View style={commonStyles.flex1}>
             {idProof ? (
@@ -684,7 +1237,6 @@ export default function AddTenantScreen() {
                     <Text numberOfLines={1} style={styles.docNameText}>
                       {idProof.name}
                     </Text>
-                    <Text style={styles.docTag}>CAN / PDF</Text>
                   </View>
                 )}
                 <TouchableOpacity
@@ -701,7 +1253,7 @@ export default function AddTenantScreen() {
               >
                 <Ionicons name="card-outline" size={26} color={COLORS.accent} />
                 <Text style={styles.uploadTitle}>ID Proof</Text>
-                <Text style={styles.uploadSubtext}>Image or CAN/PDF</Text>
+                <Text style={styles.uploadSubtext}>Image or File</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -737,15 +1289,19 @@ export default function AddTenantScreen() {
           </View>
         </View>
 
-        {/* Primary Action Button */}
+        {/* Submit Button */}
         <TouchableOpacity
           style={[commonStyles.primaryButton, styles.submitBtn]}
           activeOpacity={0.8}
-          onPress={handleCreateTenant}
+          onPress={handleCreateOrUpdateTenant}
           disabled={loading}
         >
           <Text style={commonStyles.primaryButtonText}>
-            {loading ? "Saving..." : "Confirm & Add Tenant"}
+            {loading
+              ? "Saving..."
+              : isEditing
+                ? "Update Tenant Details"
+                : "Confirm & Add Tenant"}
           </Text>
         </TouchableOpacity>
       </ScrollView>
@@ -763,12 +1319,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-    zIndex: 10,
   },
   backButton: {
     width: 40,
@@ -780,20 +1330,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  titleContainer: {
-    flex: 1,
-    alignItems: "center",
-  },
-  headerRightPlaceholder: {
-    width: 40,
-  },
-  safeArea: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  scrollView: {
-    flex: 1,
-  },
+  titleContainer: { flex: 1, alignItems: "center" },
+  headerRightPlaceholder: { width: 40 },
+  safeArea: { flex: 1, backgroundColor: COLORS.background },
+  scrollView: { flex: 1 },
   scrollContent: {
     paddingHorizontal: SPACING.md,
     paddingTop: SPACING.xs,
@@ -814,62 +1354,42 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     marginBottom: SPACING.md,
   },
-  inputGroup: {
-    marginBottom: SPACING.md,
-  },
-  inputGroupLast: {
-    marginBottom: 0,
-  },
-  horizontalScroll: {
-    marginBottom: SPACING.md,
-  },
-  flatCard: {
-    backgroundColor: COLORS.background,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  flatTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.textPrimary,
-  },
-  itemTitle: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: COLORS.textPrimary,
-  },
-  subText: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  badgeText: {
-    fontSize: 11,
-    color: COLORS.accent,
-    fontWeight: "600",
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: SPACING.xs,
-    paddingVertical: 2,
-    borderRadius: RADIUS.sm,
-  },
-  flatHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: SPACING.xs,
-  },
-  selectedBorder: {
-    borderColor: COLORS.accent,
-    borderWidth: 1.5,
-  },
-  selectedSuccessBorder: {
-    borderColor: COLORS.success,
-    borderWidth: 1.5,
-  },
+  inputGroup: { marginBottom: SPACING.md },
+  inputGroupLast: { marginBottom: 0 },
+  horizontalScroll: { marginBottom: SPACING.md },
+  itemTitle: { fontSize: 14, fontWeight: "500", color: COLORS.textPrimary },
+  subText: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+  selectedBorder: { borderColor: COLORS.accent, borderWidth: 1.5, margin: -0.5 },
+  selectedSuccessBorder: { borderColor: COLORS.success, borderWidth: 1.5, margin: -0.5 },
   disabledCard: {
-    opacity: 0.4,
+    opacity: 0.6,
+    backgroundColor: COLORS.border + "44",
+  },
+  disabledText: {
+    color: COLORS.textMuted,
+  },
+  occupiedText: {
+    color: "#E53935",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  occupiedByText: {
+    color: "#E53935",
+    fontSize: 11,
+    marginTop: 2,
+    fontWeight: "500",
+  },
+  chipBookedSub: {
+    color: "#E53935",
+    fontSize: 10,
+    marginTop: 2,
+    fontWeight: "600",
+  },
+  availableSubText: {
+    color: COLORS.accent,
+    fontSize: 11,
+    marginTop: 2,
+    fontWeight: "500",
   },
   chip: {
     flexDirection: "row",
@@ -883,18 +1403,16 @@ const styles = StyleSheet.create({
     marginRight: SPACING.sm,
     gap: SPACING.xs,
   },
+  bedsScrollContainer: {
+    maxHeight: 220,
+    marginTop: 4,
+  },
   chipSelected: {
     backgroundColor: COLORS.primary,
     borderColor: COLORS.primaryHover,
   },
-  chipText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  chipTextSelected: {
-    color: COLORS.textWhite,
-  },
+  chipText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: "500" },
+  chipTextSelected: { color: COLORS.textWhite },
   tabContainer: {
     flexDirection: "row",
     backgroundColor: COLORS.background,
@@ -909,18 +1427,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: RADIUS.sm,
   },
-  activeTab: {
-    backgroundColor: COLORS.primary,
-  },
-  tabText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    fontWeight: "500",
-  },
-  activeTabText: {
-    color: COLORS.textWhite,
-    fontWeight: "600",
-  },
+  activeTab: { backgroundColor: COLORS.primary },
+  tabText: { fontSize: 12, color: COLORS.textSecondary, fontWeight: "500" },
+  activeTabText: { color: COLORS.textWhite, fontWeight: "600" },
   selectableCard: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -930,12 +1439,17 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
+    overflow: "hidden",
   },
-  occupiedText: {
-    color: COLORS.dangerText,
-    fontSize: 12,
-    fontWeight: "600",
+  cardInfoContainer: {
+    flex: 1,
+    marginRight: SPACING.sm,
   },
+  cardActionContainer: {
+    minWidth: 60,
+    alignItems: "flex-end",
+  },
+  vacantText: { color: COLORS.accent, fontSize: 12, fontWeight: "600" },
   rentSummary: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -949,15 +1463,8 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: COLORS.textPrimary,
   },
-  rentSummarySub: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-  },
-  rentSummaryValue: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: COLORS.accent,
-  },
+  rentSummarySub: { fontSize: 11, color: COLORS.textMuted },
+  rentSummaryValue: { fontSize: 18, fontWeight: "700", color: COLORS.accent },
   uploadCard: {
     backgroundColor: COLORS.surface,
     borderWidth: 1.5,
@@ -967,7 +1474,6 @@ const styles = StyleSheet.create({
     height: 110,
     justifyContent: "center",
     alignItems: "center",
-    gap: 2,
   },
   uploadTitle: {
     color: COLORS.textPrimary,
@@ -975,10 +1481,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 4,
   },
-  uploadSubtext: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-  },
+  uploadSubtext: { color: COLORS.textMuted, fontSize: 11 },
   previewContainer: {
     height: 110,
     borderRadius: RADIUS.lg,
@@ -988,10 +1491,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     backgroundColor: COLORS.surface,
   },
-  previewImage: {
-    width: "100%",
-    height: "100%",
-  },
+  previewImage: { width: "100%", height: "100%" },
   documentPreview: {
     flex: 1,
     justifyContent: "center",
@@ -1003,13 +1503,6 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontWeight: "500",
     marginTop: 4,
-    paddingHorizontal: 8,
-  },
-  docTag: {
-    fontSize: 10,
-    color: COLORS.accent,
-    fontWeight: "700",
-    marginTop: 2,
   },
   removeBtn: {
     position: "absolute",
@@ -1022,8 +1515,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  submitBtn: {
-    marginTop: SPACING.md,
-    marginBottom: SPACING.xl,
-  },
+  submitBtn: { marginTop: SPACING.md, marginBottom: SPACING.xl },
 });

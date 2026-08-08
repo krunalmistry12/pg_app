@@ -1,8 +1,9 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import axios from "axios";
 import { router } from "expo-router";
-import { jwtDecode } from "jwt-decode"; // 👈 FIX 1: Named import fixed
-import React, { useRef, useState } from "react";
+import { jwtDecode } from "jwt-decode";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -15,65 +16,114 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import api from "../src/services/api";
+
+// Aapka ngrok ya server ka base URL
+const BASE_URL = "https://7e37-43-241-144-62.ngrok-free.app/api";
 
 export default function LoginScreen() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [focusedInput, setFocusedInput] = useState<
-    "username" | "password" | null
-  >(null);
+  const [step, setStep] = useState<"PHONE" | "OTP">("PHONE");
+  const [phone, setPhone] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpToken, setOtpToken] = useState(""); // Temporary token received from Send OTP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const passwordRef = useRef<TextInput>(null);
-
   // -------------------------------------------------------------
-  // Validation Helper
+  // 1. STEP 1: Send OTP Handler
   // -------------------------------------------------------------
-  const validateForm = (): boolean => {
-    const trimmedUsername = username.trim();
-
-    if (!trimmedUsername) {
-      setError("Please enter your username.");
-      return false;
-    }
-
-    if (!password) {
-      setError("Please enter your password.");
-      return false;
-    }
-
-    return true;
-  };
-
-  // -------------------------------------------------------------
-  // Login Action
-  // -------------------------------------------------------------
-  const handleLogin = async () => {
+  const handleSendOtp = async () => {
+    console.log("STEP 1: Sending OTP request");
     setError("");
+    const trimmedPhone = phone.trim();
 
-    // 1. Front-end Validation Check
-    if (!validateForm()) return;
+    if (!trimmedPhone || trimmedPhone.length !== 10) {
+      setError("Please enter a valid 10-digit mobile number.");
+      return;
+    }
 
     setLoading(true);
 
     try {
-      // 2. Call API
-      const response = await api.post("/User/login", {
-        name: username.trim(),
-        password: password,
-      });
+      console.log("STEP 2: Calling API -> /Auth/send-otp-stateless");
 
-      // 3. Extract Token & Data
-      const token = response?.data?.token;
+      const response = await axios.post(
+        `${BASE_URL}/Auth/send-otp-stateless`,
+        {
+          phone: trimmedPhone,
+        },
+        {
+          timeout: 30000,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-      if (token) {
-        // Decode Token to find user role
-        const decoded: any = jwtDecode(token);
+      console.log("STEP 3: OTP Sent Successfully");
+      console.log(response.data);
 
-        // Backend claims me role field check karein (Default to "Admin" or "Tenant")
+      const tokenFromServer = response.data?.otpToken;
+
+      if (tokenFromServer) {
+        setOtpToken(tokenFromServer);
+        setStep("OTP"); // Switch view to OTP input
+      } else {
+        setError("Failed to receive OTP token from server.");
+      }
+    } catch (e: any) {
+      console.log("STEP 4: Error in Send OTP");
+      console.log("Message:", e.message);
+      console.log("Response Data:", e.response?.data);
+
+      const serverMessage = e?.response?.data?.message;
+      setError(
+        serverMessage || "Mobile number not registered or account is inactive."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // -------------------------------------------------------------
+  // 2. STEP 2: Verify OTP & Login Handler
+  // -------------------------------------------------------------
+  const handleVerifyOtp = async () => {
+    console.log("STEP 1: Verifying OTP");
+    setError("");
+    const trimmedOtp = otp.trim();
+
+    if (!trimmedOtp || trimmedOtp.length < 4) {
+      setError("Please enter a valid OTP.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      console.log("STEP 2: Calling API -> /Auth/verify-otp-stateless");
+
+      const response = await axios.post(
+        `${BASE_URL}/Auth/verify-otp-stateless`,
+        {
+          phone: phone.trim(),
+          otp: trimmedOtp,
+          otpToken: otpToken, // Sending back the temporary token received in step 1
+        },
+        {
+          timeout: 30000,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      console.log("STEP 3: Login Successful");
+      const loginToken = response.data?.token;
+
+      if (loginToken) {
+        // Decode JWT token to extract role & user metadata
+        const decoded: any = jwtDecode(loginToken);
+
         const userRole =
           decoded.role ??
           decoded[
@@ -81,25 +131,32 @@ export default function LoginScreen() {
           ] ??
           "";
         const userId =
-          decoded.id ??
-          decoded.userId ??
           decoded.sub ??
           decoded[
             "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
           ] ??
-          response?.data?.user?.id ?? // Direct response object me agar user.id ho
+          response?.data?.user?.id ??
           "";
-        // Multi-save in AsyncStorage
+
+        // Save session locally in AsyncStorage
         await Promise.all([
-          AsyncStorage.setItem("token", token),
+          AsyncStorage.setItem("token", loginToken),
           AsyncStorage.setItem("isLoggedIn", "true"),
           AsyncStorage.setItem("userRole", userRole),
-          AsyncStorage.setItem("userId", userId),
+          AsyncStorage.setItem("userId", String(userId)),
         ]);
-        console.log("Login Error:", userRole);
-        // 🚦 ROLE BASED ROUTING 🚦
-        // 👈 FIX 2: Added 'as any' casting to prevent Expo Router type issues
-        if (userRole === "Admin" || userRole === "Manager") {
+
+        console.log("STEP 4: Navigating based on Role:", userRole);
+
+        // Role-based navigation redirect
+        if(userRole === "Admin"){
+
+        }
+        else if (
+          userRole === "Admin" ||
+          userRole === "SuperAdmin" ||
+          userRole === "Staff"
+        ) {
           router.replace("/(tabs)" as any);
         } else if (userRole === "User") {
           router.replace("/(tenant)" as any);
@@ -109,41 +166,19 @@ export default function LoginScreen() {
       } else {
         setError("Invalid response from server. Token missing.");
       }
-    } catch (err: any) {
-      // 🔍 EXACT ERROR LOG KARNE KE LIYE YAHAN CONSOLE LAGAEYIN
-      console.log("=== LOGIN ERROR DETAILS ===");
-      console.log("Error Message:", err.message);
-      console.log("Error Response:", err.response?.data);
-      console.log("Error Status:", err.response?.status);
+    } catch (e: any) {
+      console.log("STEP 4: Error in Verify OTP");
+      console.log("Message:", e.message);
+      console.log("Response Data:", e.response?.data);
 
-      if (err.response) {
-        const status = err.response.status;
-        const serverMessage = err.response.data?.message;
-
-        if (status === 401 || status === 400) {
-          setError(serverMessage || "Invalid username or password.");
-        } else if (status >= 500) {
-          setError("Server is temporarily down. Please try again later.");
-        } else {
-          setError(serverMessage || "An error occurred during login.");
-        }
-      } else if (err.request) {
-        setError(
-          "Network error. Server tak request nahi pahunch rahi. Check Ngrok URL.",
-        );
+      if (e.response) {
+        setError(e.response.data?.message || "Invalid OTP entered.");
       } else {
-        setError("Something went wrong. Please try again.");
+        setError("Network error. Please check your connection.");
       }
     } finally {
       setLoading(false);
     }
-  };
-
-  // Quick helper for Demo / Staging environment
-  const handleDemoFill = () => {
-    setUsername("kunal");
-    setPassword("123456");
-    setError("");
   };
 
   return (
@@ -163,131 +198,142 @@ export default function LoginScreen() {
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.logoCircle}>
-              <Ionicons name="business" size={36} color="#38BDF8" />
+              <Ionicons name="shield-checkmark" size={36} color="#38BDF8" />
             </View>
             <Text style={styles.title}>PG Manager</Text>
             <Text style={styles.subtitle}>
-              Manage your PG smarter and faster
+              Secure Mobile & OTP Authentication
             </Text>
           </View>
 
-          {/* Login Card */}
+          {/* Form Card */}
           <View style={styles.card}>
-            <Text style={styles.welcome}>Welcome Back 👋</Text>
-            <Text style={styles.cardSub}>Sign in to continue</Text>
-
-            {/* Username Input */}
-            <Text style={styles.label}>Username</Text>
-            <View
-              style={[
-                styles.inputContainer,
-                focusedInput === "username" && styles.inputFocused,
-              ]}
-            >
-              <Ionicons
-                name="person-outline"
-                size={20}
-                color={focusedInput === "username" ? "#2563EB" : "#64748B"}
-              />
-              <TextInput
-                placeholder="e.g. kunal_admin"
-                placeholderTextColor="#94A3B8"
-                value={username}
-                onChangeText={(text) => {
-                  setUsername(text);
-                  if (error) setError("");
-                }}
-                onFocus={() => setFocusedInput("username")}
-                onBlur={() => setFocusedInput(null)}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.input}
-                returnKeyType="next"
-                onSubmitEditing={() => passwordRef.current?.focus()}
-              />
-            </View>
-
-            {/* Password Input */}
-            <Text style={styles.label}>Password</Text>
-            <View
-              style={[
-                styles.inputContainer,
-                focusedInput === "password" && styles.inputFocused,
-              ]}
-            >
-              <Ionicons
-                name="lock-closed-outline"
-                size={20}
-                color={focusedInput === "password" ? "#2563EB" : "#64748B"}
-              />
-              <TextInput
-                ref={passwordRef}
-                placeholder="Minimum 6 characters"
-                placeholderTextColor="#94A3B8"
-                secureTextEntry={!showPassword}
-                value={password}
-                onChangeText={(text) => {
-                  setPassword(text);
-                  if (error) setError("");
-                }}
-                onFocus={() => setFocusedInput("password")}
-                onBlur={() => setFocusedInput(null)}
-                style={styles.input}
-                returnKeyType="done"
-                onSubmitEditing={handleLogin}
-              />
-              <TouchableOpacity
-                onPress={() => setShowPassword(!showPassword)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons
-                  name={!showPassword ? "eye-off-outline" : "eye-outline"}
-                  size={20}
-                  color="#64748B"
-                />
-              </TouchableOpacity>
-            </View>
-
-            {/* Error Notification */}
-            {error ? (
-              <View style={styles.errorBox}>
-                <Ionicons
-                  name="alert-circle-outline"
-                  size={18}
-                  color="#DC2626"
-                />
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            ) : null}
-
-            {/* Submit Button */}
-            <TouchableOpacity
-              style={[styles.loginButton, loading && styles.buttonDisabled]}
-              onPress={handleLogin}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.loginText}>Login</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Demo Helper Button */}
-            {__DEV__ && (
-              <TouchableOpacity
-                style={styles.demoBox}
-                onPress={handleDemoFill}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="flash-outline" size={16} color="#2563EB" />
-                <Text style={styles.demoText}>
-                  Demo Login:{" "}
-                  <Text style={styles.demoBold}>kunal / 123456</Text> (Tap to
-                  fill)
+            {step === "PHONE" ? (
+              <>
+                <Text style={styles.welcome}>Welcome Back 👋</Text>
+                <Text style={styles.cardSub}>
+                  Enter your registered mobile number
                 </Text>
-              </TouchableOpacity>
+
+                <Text style={styles.label}>Mobile Number</Text>
+                <View style={styles.inputContainer}>
+                  <Text style={styles.countryCode}>+91</Text>
+                  <TextInput
+                    placeholder="9876543210"
+                    placeholderTextColor="#94A3B8"
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                    value={phone}
+                    onChangeText={(text) => {
+                      setPhone(text);
+                      if (error) setError("");
+                    }}
+                    style={styles.input}
+                    returnKeyType="done"
+                    onSubmitEditing={handleSendOtp}
+                  />
+                </View>
+
+                {error ? (
+                  <View style={styles.errorBox}>
+                    <Ionicons
+                      name="alert-circle-outline"
+                      size={18}
+                      color="#DC2626"
+                    />
+                    <Text style={styles.errorText}>{error}</Text>
+                  </View>
+                ) : null}
+
+                <TouchableOpacity
+                  style={[styles.loginButton, loading && styles.buttonDisabled]}
+                  onPress={handleSendOtp}
+                  disabled={loading}
+                  activeOpacity={0.8}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.loginText}>Get OTP</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <View style={styles.otpHeaderRow}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setStep("PHONE");
+                      setOtp("");
+                      setOtpToken("");
+                      setError("");
+                    }}
+                  >
+                    <Ionicons name="arrow-back" size={22} color="#0F172A" />
+                  </TouchableOpacity>
+                  <Text style={styles.welcome}>Verify OTP 🔐</Text>
+                </View>
+                <Text style={styles.cardSub}>
+                  Code sent to{" "}
+                  <Text style={{ fontWeight: "700", color: "#0F172A" }}>
+                    +91 {phone}
+                  </Text>
+                </Text>
+
+                <Text style={styles.label}>Enter OTP</Text>
+                <View style={styles.inputContainer}>
+                  <Ionicons name="key-outline" size={20} color="#64748B" />
+                  <TextInput
+                    placeholder="Enter 6-digit OTP"
+                    placeholderTextColor="#94A3B8"
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    value={otp}
+                    onChangeText={(text) => {
+                      setOtp(text);
+                      if (error) setError("");
+                    }}
+                    style={[styles.input, { marginLeft: 12 }]}
+                    returnKeyType="done"
+                    onSubmitEditing={handleVerifyOtp}
+                  />
+                </View>
+
+                {error ? (
+                  <View style={styles.errorBox}>
+                    <Ionicons
+                      name="alert-circle-outline"
+                      size={18}
+                      color="#DC2626"
+                    />
+                    <Text style={styles.errorText}>{error}</Text>
+                  </View>
+                ) : null}
+
+                <TouchableOpacity
+                  style={[styles.loginButton, loading && styles.buttonDisabled]}
+                  onPress={handleVerifyOtp}
+                  disabled={loading}
+                  activeOpacity={0.8}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.loginText}>Verify & Login</Text>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.resendBox}
+                  onPress={handleSendOtp}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.resendText}>
+                    Didn't receive code?{" "}
+                    <Text style={styles.resendBold}>Resend OTP</Text>
+                  </Text>
+                </TouchableOpacity>
+              </>
             )}
 
             <Text style={styles.footer}>PG Management System v1.0</Text>
@@ -357,6 +403,11 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     marginTop: 4,
   },
+  otpHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
   label: {
     fontSize: 13,
     fontWeight: "700",
@@ -375,13 +426,17 @@ const styles = StyleSheet.create({
     borderColor: "#E2E8F0",
     marginBottom: 10,
   },
-  inputFocused: {
-    borderColor: "#2563EB",
-    backgroundColor: "#FFFFFF",
+  countryCode: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginRight: 8,
+    borderRightWidth: 1,
+    borderRightColor: "#CBD5E1",
+    paddingRight: 8,
   },
   input: {
     flex: 1,
-    marginLeft: 12,
     color: "#0F172A",
     fontSize: 15,
   },
@@ -395,6 +450,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 10,
+    marginTop: 4,
   },
   errorText: {
     color: "#DC2626",
@@ -419,29 +475,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
-  demoBox: {
+  resendBox: {
     marginTop: 16,
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#EFF6FF",
-    borderWidth: 1,
-    borderColor: "#BFDBFE",
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
   },
-  demoText: {
-    color: "#2563EB",
+  resendText: {
+    color: "#64748B",
     fontSize: 13,
-    marginLeft: 6,
   },
-  demoBold: {
+  resendBold: {
+    color: "#2563EB",
     fontWeight: "700",
   },
   footer: {
     textAlign: "center",
-    marginTop: 20,
+    marginTop: 30,
     color: "#94A3B8",
     fontSize: 12,
   },

@@ -4,9 +4,11 @@ import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Linking,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -17,13 +19,14 @@ import {
   View,
 } from "react-native";
 
-// --- Shared Theme Configuration ---
+import { getTenantsByUserIdApi } from "../../src/services/tenantApi";
+
 export const THEME = {
   colors: {
-    bgDark: "#0F172A", // Deep Slate
-    cardBg: "#1E293B", // Elevated Surface
+    bgDark: "#0F172A",
+    cardBg: "#1E293B",
     cardBgSubtle: "#0F172A",
-    primary: "#2563EB", // Admin Blue
+    primary: "#2563EB",
     primaryHover: "#1D4ED8",
     border: "#334155",
     textPrimary: "#F8FAFC",
@@ -61,351 +64,580 @@ export interface Tenant {
   name: string;
   phone: string;
   room: string;
-  bed: string;
+  bed?: string;
+  allocationType?: string;
   status: "Active" | "Inactive";
   deposit?: string;
   dueDate?: string;
-  hasAadhaar?: boolean;
+  hasIdProof?: boolean;
   hasPhoto?: boolean;
+  policeVerificationStatus?: string;
   emergencyContact?: string;
+  rawItem?: any;
 }
 
-const defaultTenants: Tenant[] = [
-  {
-    id: "1",
-    pgId: "pg1",
-    pgName: "Sunrise Heights PG",
-    name: "Rahul Sharma",
-    phone: "9876543210",
-    room: "101",
-    bed: "A1",
-    status: "Active",
-    deposit: "10000",
-    dueDate: "5th of every month",
-    hasAadhaar: true,
-    hasPhoto: true,
-    emergencyContact: "9811223344",
+const TenantCard = React.memo(
+  ({
+    item,
+    onCall,
+    onViewDetails,
+  }: {
+    item: Tenant;
+    onCall: (phone: string) => void;
+    onViewDetails: (item: Tenant) => void;
+  }) => {
+    const getPoliceBadgeStyle = (status?: string) => {
+      switch (status) {
+        case "VERIFIED":
+          return {
+            bg: THEME.colors.successBg,
+            border: THEME.colors.successBorder,
+            text: THEME.colors.successText,
+            label: "Police Verified",
+          };
+        case "IN_PROGRESS":
+          return {
+            bg: THEME.colors.warningBg,
+            border: THEME.colors.warningBorder,
+            text: THEME.colors.warningText,
+            label: "Police Verification Pending",
+          };
+        default:
+          return {
+            bg: THEME.colors.dangerBg,
+            border: THEME.colors.dangerBg,
+            text: THEME.colors.dangerText,
+            label: "Police Verification Not Started",
+          };
+      }
+    };
+
+    const policeBadge = getPoliceBadgeStyle(item.policeVerificationStatus);
+
+    // Check karein ki bed maujood hai ya nahi
+    const hasBed = Boolean(item.bed && item.allocationType !== "FULL_ROOM");
+
+    return (
+      <View style={styles.card}>
+        {/* Top Header Row */}
+        <View style={styles.topRow}>
+          <View style={styles.avatarContainer}>
+            <Text style={styles.avatarText}>{item.name[0]?.toUpperCase()}</Text>
+          </View>
+
+          <View style={styles.nameContainer}>
+            <Text style={styles.name}>{item.name}</Text>
+            <Text style={styles.phoneSub}>{item.phone}</Text>
+            {item.pgName && (
+              <View style={styles.pgTagContainer}>
+                <Ionicons
+                  name="business"
+                  size={12}
+                  color={THEME.colors.textSecondary}
+                />
+                <Text style={styles.pgTagText}>{item.pgName}</Text>
+              </View>
+            )}
+          </View>
+
+          <View
+            style={[
+              styles.statusBadge,
+              {
+                backgroundColor:
+                  item.status === "Active"
+                    ? THEME.colors.successBg
+                    : THEME.colors.dangerBg,
+                borderColor:
+                  item.status === "Active"
+                    ? THEME.colors.successBorder
+                    : THEME.colors.dangerBg,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusBadgeText,
+                {
+                  color:
+                    item.status === "Active"
+                      ? THEME.colors.successText
+                      : THEME.colors.dangerText,
+                },
+              ]}
+            >
+              {item.status}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Room & Bed/Allocation Info */}
+        <View style={styles.infoRow}>
+          {/* Agar bed nahi hai toh room poori width (100%) le lega */}
+          <View
+            style={[styles.infoBox, !hasBed && { width: "100%" }]}
+          >
+            <Ionicons
+              name="business-outline"
+              size={15}
+              color={THEME.colors.accent}
+            />
+            <Text style={styles.infoText} numberOfLines={1}>
+              Room: {item.room}
+            </Text>
+          </View>
+
+          {/* Agar Full Room hai toh Full Room show karega, warna agar bed hai toh Bed show karega */}
+          {item.allocationType === "FULL_ROOM" ? (
+            <View style={styles.infoBox}>
+              <Ionicons
+                name="home-outline"
+                size={15}
+                color={THEME.colors.accent}
+              />
+              <Text style={styles.infoText} numberOfLines={1}>
+                Type: Full Room
+              </Text>
+            </View>
+          ) : (
+            hasBed && (
+              <View style={styles.infoBox}>
+                <Ionicons
+                  name="bed-outline"
+                  size={15}
+                  color={THEME.colors.warningText}
+                />
+                <Text style={styles.infoText} numberOfLines={1}>
+                  Bed: {item.bed}
+                </Text>
+              </View>
+            )
+          )}
+        </View>
+
+        {/* Document & Verification Badges */}
+        <View style={styles.verificationRow}>
+          <View
+            style={[
+              styles.tag,
+              item.hasIdProof ? styles.tagSuccess : styles.tagWarning,
+            ]}
+          >
+            <Ionicons
+              name={item.hasIdProof ? "checkmark-circle" : "alert-circle"}
+              size={13}
+              color={
+                item.hasIdProof
+                  ? THEME.colors.successText
+                  : THEME.colors.warningText
+              }
+            />
+            <Text
+              style={[
+                styles.tagText,
+                {
+                  color: item.hasIdProof
+                    ? THEME.colors.successText
+                    : THEME.colors.warningText,
+                },
+              ]}
+            >
+              {item.hasIdProof ? "ID Verified" : "ID Pending"}
+            </Text>
+          </View>
+
+          <View
+            style={[
+              styles.tag,
+              {
+                backgroundColor: policeBadge.bg,
+                borderColor: policeBadge.border,
+              },
+            ]}
+          >
+            <Ionicons
+              name={
+                item.policeVerificationStatus === "VERIFIED"
+                  ? "shield-checkmark"
+                  : "shield-outline"
+              }
+              size={13}
+              color={policeBadge.text}
+            />
+            <Text style={[styles.tagText, { color: policeBadge.text }]}>
+              {policeBadge.label}
+            </Text>
+          </View>
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={styles.callButton}
+            onPress={() => onCall(item.phone)}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="call-outline"
+              size={16}
+              color={THEME.colors.successText}
+            />
+            <Text style={styles.callButtonText}>Call</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.detailsButton}
+            activeOpacity={0.8}
+            onPress={() => onViewDetails(item)}
+          >
+            <Text style={styles.detailsButtonText}>View Profile</Text>
+            <Ionicons name="chevron-forward" size={15} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
   },
-  {
-    id: "2",
-    pgId: "pg2",
-    pgName: "Green Villa PG",
-    name: "Priya Patel",
-    phone: "9123456789",
-    room: "202",
-    bed: "B2",
-    status: "Active",
-    deposit: "8000",
-    dueDate: "1st of every month",
-    hasAadhaar: true,
-    hasPhoto: false,
-    emergencyContact: "9822334455",
-  },
-];
+);
 
 export default function TenantsScreen() {
-  const [tenants, setTenants] = useState<Tenant[]>(defaultTenants);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPg, setSelectedPg] = useState<string>("ALL");
-  const [selectedStatus, setSelectedStatus] = useState<"ALL" | "Active" | "Inactive">("ALL");
+  const [selectedStatus, setSelectedStatus] = useState<
+    "ALL" | "Active" | "Inactive"
+  >("ALL");
 
   const loadTenants = async () => {
     try {
-      const data = await AsyncStorage.getItem("tenants");
-      if (data) {
-        const storedTenants: Tenant[] = JSON.parse(data);
-        const combined = [...defaultTenants];
-        storedTenants.forEach((st) => {
-          if (!combined.some((t) => t.id === st.id)) {
-            combined.push(st);
-          }
-        });
-        setTenants(combined);
+      const storedUserId = await AsyncStorage.getItem("userId");
+      if (!storedUserId) {
+        Alert.alert(
+          "Authentication Error",
+          "User ID not found. Please log in again.",
+        );
+        setLoading(false);
+        setRefreshing(false);
+        return;
       }
-    } catch (e) {
-      console.error("Failed to load tenants:", e);
+
+      const cachedData = await AsyncStorage.getItem("cached_tenants_list");
+      if (cachedData) {
+        setTenants(JSON.parse(cachedData));
+        setLoading(false);
+      }
+
+      const data = await getTenantsByUserIdApi(storedUserId);
+      const apiData = Array.isArray(data) ? data : data?.data || [];
+
+      const mappedTenants: Tenant[] = apiData.map((item: any) => {
+        const roomDisplay =
+          item.roomName ||
+          item.roomNumber ||
+          item.flatNumber ||
+          (item.roomId ? `Room ${item.roomId}` : "N/A");
+
+        // Allocation type detection (Agar backend se FULL_ROOM hai ya bed info nahi hai)
+        const allocation = 
+          item.allocationType || 
+          item.bookingType || 
+          (item.bedNumber || item.bedId ? "BED" : "FULL_ROOM");
+
+        // Agar allocation FULL_ROOM hai, toh bedDisplay ko strictly undefined kar do
+        const isFullRoom = allocation === "FULL_ROOM" || String(allocation).toLowerCase().includes("full");
+
+        const bedDisplay = isFullRoom
+          ? undefined
+          : item.bedNumber ||
+            item.bedName ||
+            (item.bedId ? `Bed ${item.bedId}` : undefined);
+
+        const rawStatus = item.status;
+        let isActive = false;
+        if (
+          rawStatus === 1 ||
+          rawStatus === true ||
+          String(rawStatus).toLowerCase() === "active" ||
+          String(rawStatus).toLowerCase() === "1" ||
+          String(rawStatus).toLowerCase() === "true"
+        ) {
+          isActive = true;
+        }
+
+        return {
+          id: String(item.id || item.tenantId || ""),
+          pgId: String(item.propertyId || item.flatId || ""),
+          pgName:
+            item.apartmentName ||
+            (item.flatNumber ? `Flat ${item.flatNumber}` : "Property"),
+          name: item.name || "Unknown Tenant",
+          phone: item.phone || "",
+          room: String(roomDisplay),
+          bed: bedDisplay ? String(bedDisplay) : undefined,
+          allocationType: isFullRoom ? "FULL_ROOM" : String(allocation),
+          status: isActive ? "Active" : "Inactive",
+          deposit: item.deposit ? String(item.deposit) : "0",
+          dueDate: item.dueDate ? `${item.dueDate}th of every month` : "N/A",
+          hasIdProof: Boolean(item.idProofUrl || item.idProofNumber),
+          hasPhoto: Boolean(item.tenantPhotoUrl),
+          policeVerificationStatus:
+            item.policeVerificationStatus || "NOT_STARTED",
+          emergencyContact: item.emergencyPhone || "",
+          rawItem: item,
+        };
+      });
+
+      setTenants(mappedTenants);
+      await AsyncStorage.setItem(
+        "cached_tenants_list",
+        JSON.stringify(mappedTenants),
+      );
+    } catch (error: any) {
+      console.error("Error fetching tenants:", error?.message || error);
+      const cachedData = await AsyncStorage.getItem("cached_tenants_list");
+      if (cachedData) {
+        setTenants(JSON.parse(cachedData));
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useFocusEffect(
     useCallback(() => {
+      if (tenants.length === 0) {
+        setLoading(true);
+      }
       loadTenants();
-    }, [])
+    }, []),
   );
 
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadTenants();
+  }, []);
+
   const availablePgs = useMemo(() => {
-    const pgs = tenants.map((t) => t.pgName).filter((name): name is string => Boolean(name));
+    const pgs = tenants
+      .map((t) => t.pgName)
+      .filter((name): name is string => Boolean(name));
     return Array.from(new Set(pgs));
   }, [tenants]);
 
   const filteredTenants = useMemo(() => {
     return tenants.filter((t) => {
       const matchesPg = selectedPg === "ALL" || t.pgName === selectedPg;
-      const matchesStatus = selectedStatus === "ALL" || t.status === selectedStatus;
+      const matchesStatus =
+        selectedStatus === "ALL" || t.status === selectedStatus;
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch =
         q === "" ||
         t.name.toLowerCase().includes(q) ||
         t.phone.includes(q) ||
         t.room.toLowerCase().includes(q) ||
-        t.bed.toLowerCase().includes(q) ||
+        (t.bed && t.bed.toLowerCase().includes(q)) ||
         (t.pgName && t.pgName.toLowerCase().includes(q));
 
       return matchesPg && matchesStatus && matchesSearch;
     });
   }, [tenants, selectedPg, selectedStatus, searchQuery]);
 
-  const makePhoneCall = async (phoneNumber: string) => {
+  const makePhoneCall = useCallback(async (phoneNumber: string) => {
+    if (!phoneNumber) {
+      Alert.alert("Error", "Phone number not available.");
+      return;
+    }
     const url = `tel:${phoneNumber}`;
     try {
       const supported = await Linking.canOpenURL(url);
       if (supported) {
         await Linking.openURL(url);
       } else {
-        Alert.alert("Error", "Phone call function is not supported on this device.");
+        Alert.alert(
+          "Error",
+          "Phone call function is not supported on this device.",
+        );
       }
     } catch {
       Alert.alert("Error", "Unable to open phone dialer.");
     }
-  };
+  }, []);
 
-  const renderTenantItem = ({ item }: { item: Tenant }) => (
-    <View style={styles.card}>
-      {/* Top Header Row */}
-      <View style={styles.topRow}>
-        <View style={styles.avatarContainer}>
-          <Text style={styles.avatarText}>{item.name[0]?.toUpperCase()}</Text>
-        </View>
+  const handleViewDetails = useCallback((item: Tenant) => {
+    router.push({
+      pathname: "/tenant-details" as any,
+      params: {
+        id: item.id,
+        tenantData: JSON.stringify(item.rawItem || item),
+      },
+    });
+  }, []);
 
-        <View style={styles.nameContainer}>
-          <Text style={styles.name}>{item.name}</Text>
-          <Text style={styles.phoneSub}>{item.phone}</Text>
-          {item.pgName && (
-            <View style={styles.pgTagContainer}>
-              <Ionicons name="business" size={12} color={THEME.colors.textSecondary} />
-              <Text style={styles.pgTagText}>{item.pgName}</Text>
-            </View>
-          )}
-        </View>
-
-        <View
-          style={[
-            styles.statusBadge,
-            {
-              backgroundColor:
-                item.status === "Active" ? THEME.colors.successBg : THEME.colors.dangerBg,
-              borderColor:
-                item.status === "Active" ? THEME.colors.successBorder : THEME.colors.dangerBg,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.statusBadgeText,
-              {
-                color:
-                  item.status === "Active" ? THEME.colors.successText : THEME.colors.dangerText,
-              },
-            ]}
-          >
-            {item.status}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.divider} />
-
-      {/* Room & Bed Quick Metadata */}
-      <View style={styles.infoRow}>
-        <View style={styles.infoBox}>
-          <Ionicons name="business-outline" size={15} color={THEME.colors.accent} />
-          <Text style={styles.infoText}>Room {item.room}</Text>
-        </View>
-        <View style={styles.infoBox}>
-          <Ionicons name="bed-outline" size={15} color={THEME.colors.warningText} />
-          <Text style={styles.infoText}>Bed {item.bed}</Text>
-        </View>
-      </View>
-
-      {/* Compliance / Document Status Badges */}
-      <View style={styles.verificationRow}>
-        <View
-          style={[
-            styles.tag,
-            item.hasAadhaar ? styles.tagSuccess : styles.tagWarning,
-          ]}
-        >
-          <Ionicons
-            name={item.hasAadhaar ? "checkmark-circle" : "alert-circle"}
-            size={13}
-            color={item.hasAadhaar ? THEME.colors.successText : THEME.colors.warningText}
-          />
-          <Text
-            style={[
-              styles.tagText,
-              { color: item.hasAadhaar ? THEME.colors.successText : THEME.colors.warningText },
-            ]}
-          >
-            {item.hasAadhaar ? "ID Verified" : "ID Pending"}
-          </Text>
-        </View>
-
-        <View
-          style={[
-            styles.tag,
-            item.hasPhoto ? styles.tagSuccess : styles.tagWarning,
-          ]}
-        >
-          <Ionicons
-            name={item.hasPhoto ? "image" : "alert-circle"}
-            size={13}
-            color={item.hasPhoto ? THEME.colors.successText : THEME.colors.warningText}
-          />
-          <Text
-            style={[
-              styles.tagText,
-              { color: item.hasPhoto ? THEME.colors.successText : THEME.colors.warningText },
-            ]}
-          >
-            {item.hasPhoto ? "Photo Attached" : "Photo Missing"}
-          </Text>
-        </View>
-      </View>
-
-      {/* Action Buttons */}
-      <View style={styles.actionRow}>
-        <TouchableOpacity
-          style={styles.callButton}
-          onPress={() => makePhoneCall(item.phone)}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="call-outline" size={16} color={THEME.colors.successText} />
-          <Text style={styles.callButtonText}>Call</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.detailsButton}
-          activeOpacity={0.8}
-          onPress={() =>
-            router.push({
-              pathname: "/tenant-details" as any,
-              params: {
-                id: item.id,
-                name: item.name,
-                phone: item.phone,
-                room: item.room,
-                bed: item.bed,
-                status: item.status,
-                pgName: item.pgName ?? "",
-                deposit: item.deposit ?? "",
-                dueDate: item.dueDate ?? "",
-                hasAadhaar: item.hasAadhaar ? "true" : "false",
-                hasPhoto: item.hasPhoto ? "true" : "false",
-                emergencyContact: item.emergencyContact ?? "",
-              },
-            })
-          }
-        >
-          <Text style={styles.detailsButtonText}>View Profile</Text>
-          <Ionicons name="chevron-forward" size={15} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
-    </View>
+  const renderTenantItem = useCallback(
+    ({ item }: { item: Tenant }) => {
+      return (
+        <TenantCard
+          item={item}
+          onCall={makePhoneCall}
+          onViewDetails={handleViewDetails}
+        />
+      );
+    },
+    [makePhoneCall, handleViewDetails],
   );
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={THEME.colors.bgDark} />
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={THEME.colors.bgDark}
+      />
 
-      {/* Admin Screen Title Header */}
-      <View style={styles.header}>
-        <View style={styles.headerTitleRow}>
-          <Ionicons name="people" size={22} color={THEME.colors.primary} />
-          <Text style={styles.title}>Tenant Directory</Text>
+      <View style={styles.mainWrapper}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerTitleRow}>
+            <Ionicons name="people" size={22} color={THEME.colors.primary} />
+            <Text style={styles.title}>Tenant Directory</Text>
+          </View>
+          <Text style={styles.totalBadge}>
+            {filteredTenants.length} Records
+          </Text>
         </View>
-        <Text style={styles.totalBadge}>{filteredTenants.length} Records</Text>
-      </View>
 
-      {/* Property Selector Chips */}
-      {availablePgs.length > 0 && (
-        <View style={styles.filterSection}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <TouchableOpacity
-              style={[styles.chip, selectedPg === "ALL" && styles.activeChip]}
-              onPress={() => setSelectedPg("ALL")}
-            >
-              <Text style={[styles.chipText, selectedPg === "ALL" && styles.activeChipText]}>
-                All Properties
-              </Text>
-            </TouchableOpacity>
-            {availablePgs.map((pgName) => (
+        {/* Property Selector Chips */}
+        {availablePgs.length > 0 && (
+          <View style={styles.filterSection}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <TouchableOpacity
-                key={pgName}
-                style={[styles.chip, selectedPg === pgName && styles.activeChip]}
-                onPress={() => setSelectedPg(pgName)}
+                style={[styles.chip, selectedPg === "ALL" && styles.activeChip]}
+                onPress={() => setSelectedPg("ALL")}
               >
-                <Text style={[styles.chipText, selectedPg === pgName && styles.activeChipText]}>
-                  {pgName}
+                <Text
+                  style={[
+                    styles.chipText,
+                    selectedPg === "ALL" && styles.activeChipText,
+                  ]}
+                >
+                  All Properties
                 </Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+              {availablePgs.map((pgName) => (
+                <TouchableOpacity
+                  key={pgName}
+                  style={[
+                    styles.chip,
+                    selectedPg === pgName && styles.activeChip,
+                  ]}
+                  onPress={() => setSelectedPg(pgName)}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      selectedPg === pgName && styles.activeChipText,
+                    ]}
+                  >
+                    {pgName}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
-      {/* Search Input */}
-      <View style={styles.searchContainer}>
-        <Ionicons name="search-outline" size={18} color={THEME.colors.textMuted} />
-        <TextInput
-          placeholder="Search by name, phone, room..."
-          placeholderTextColor={THEME.colors.textMuted}
-          style={styles.searchInput}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery("")}>
-            <Ionicons name="close-circle" size={18} color={THEME.colors.textMuted} />
-          </TouchableOpacity>
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <Ionicons
+            name="search-outline"
+            size={18}
+            color={THEME.colors.textMuted}
+          />
+          <TextInput
+            placeholder="Search by name, phone, room..."
+            placeholderTextColor={THEME.colors.textMuted}
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <Ionicons
+                name="close-circle"
+                size={18}
+                color={THEME.colors.textMuted}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Status Segment Control */}
+        <View style={styles.statusRow}>
+          {(["ALL", "Active", "Inactive"] as const).map((status) => (
+            <TouchableOpacity
+              key={status}
+              style={[
+                styles.statusChip,
+                selectedStatus === status && styles.activeStatusChip,
+              ]}
+              onPress={() => setSelectedStatus(status)}
+            >
+              <Text
+                style={[
+                  styles.statusChipText,
+                  selectedStatus === status && styles.activeStatusChipText,
+                ]}
+              >
+                {status}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Tenant FlatList */}
+        {loading && tenants.length === 0 ? (
+          <View style={styles.loaderContainer}>
+            <ActivityIndicator size="large" color={THEME.colors.primary} />
+            <Text style={styles.loadingText}>Loading Tenants...</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={filteredTenants}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={{ paddingBottom: 100 }}
+            showsVerticalScrollIndicator={false}
+            renderItem={renderTenantItem}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={7}
+            removeClippedSubviews={true}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={THEME.colors.primary}
+              />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons
+                  name="folder-open-outline"
+                  size={44}
+                  color={THEME.colors.textMuted}
+                />
+                <Text style={styles.emptyText}>
+                  No matching tenant records found
+                </Text>
+              </View>
+            }
+          />
         )}
       </View>
 
-      {/* Status Segment Control */}
-      <View style={styles.statusRow}>
-        {(["ALL", "Active", "Inactive"] as const).map((status) => (
-          <TouchableOpacity
-            key={status}
-            style={[styles.statusChip, selectedStatus === status && styles.activeStatusChip]}
-            onPress={() => setSelectedStatus(status)}
-          >
-            <Text
-              style={[
-                styles.statusChipText,
-                selectedStatus === status && styles.activeStatusChipText,
-              ]}
-            >
-              {status}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Tenant List */}
-      <FlatList
-        data={filteredTenants}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ paddingBottom: 100 }}
-        showsVerticalScrollIndicator={false}
-        renderItem={renderTenantItem}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="folder-open-outline" size={44} color={THEME.colors.textMuted} />
-            <Text style={styles.emptyText}>No matching tenant records found</Text>
-          </View>
-        }
-      />
-
-      {/* Floating Add Tenant Button */}
+      {/* FAB (Add Tenant) */}
       <TouchableOpacity
         style={styles.fab}
         activeOpacity={0.85}
@@ -421,13 +653,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: THEME.colors.bgDark,
+  },
+  mainWrapper: {
+    flex: 1,
     paddingHorizontal: THEME.spacing.lg,
+    paddingTop: THEME.spacing.sm,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: THEME.spacing.md,
+    marginTop: THEME.spacing.sm,
     marginBottom: THEME.spacing.md,
   },
   headerTitleRow: {
@@ -482,8 +718,8 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.colors.cardBg,
     borderRadius: THEME.radius.md,
     paddingHorizontal: THEME.spacing.md,
-    height: 44,
-    marginBottom: THEME.spacing.sm,
+    height: 46,
+    marginBottom: THEME.spacing.md,
     borderWidth: 1,
     borderColor: THEME.colors.border,
   },
@@ -501,7 +737,7 @@ const styles = StyleSheet.create({
   statusChip: {
     flex: 1,
     alignItems: "center",
-    paddingVertical: 7,
+    paddingVertical: 9,
     backgroundColor: THEME.colors.cardBg,
     borderRadius: THEME.radius.md,
     borderWidth: 1,
@@ -603,6 +839,7 @@ const styles = StyleSheet.create({
     marginLeft: THEME.spacing.sm,
     fontSize: 12,
     fontWeight: "500",
+    flex: 1,
   },
   verificationRow: {
     flexDirection: "row",
@@ -668,6 +905,17 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginRight: 4,
     fontSize: 12,
+  },
+  loaderContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 50,
+  },
+  loadingText: {
+    color: THEME.colors.textMuted,
+    marginTop: THEME.spacing.sm,
+    fontSize: 13,
   },
   emptyContainer: {
     alignItems: "center",
