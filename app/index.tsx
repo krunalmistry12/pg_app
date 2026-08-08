@@ -61,7 +61,9 @@ export default function Index() {
 
             console.log("Login Error:", userRole);
             // 🚦 ROLE-BASED ROUTING LOGIC (FIXED TO MATCH YOUR FOLDERS) 🚦
-            if (userRole === "Admin" || userRole === "Manager") {
+            if (userRole === "SuperAdmin") {
+              setTargetRoute("/(Superadmin)");
+            } else if (userRole === "Admin" || userRole === "Manager") {
               setTargetRoute("/(tabs)"); // 👈 Admin / Manager goes to (tabs)
             } else if (userRole === "User" || userRole === "Student") {
               setTargetRoute("/(tenant)"); // 👈 Tenant goes to (tenant)

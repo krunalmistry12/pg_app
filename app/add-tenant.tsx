@@ -90,27 +90,20 @@ interface Flat {
   roomBreakup?: Room[];
 }
 
-// 🛠️ Safe entity ID comparison helper to eliminate type mismatch bugs
-const areEntitiesEqual = (id1: any, id2: any): boolean => {
-  if (id1 === undefined || id1 === null || id2 === undefined || id2 === null)
-    return false;
-  return String(id1) === String(id2);
-};
-
-const getEntityId = (item: any): string => {
+const getEntityId = (item: any, label: string = "ITEM"): string => {
   if (!item) return "";
   const candidates = [
-    item.id,
-    item.zoneId,
-    item.roomId,
-    item.bedId,
-    item.flatId,
-    item.uuid,
-    item._id,
+    { key: "id", val: item.id },
+    { key: "zoneId", val: item.zoneId },
+    { key: "roomId", val: item.roomId },
+    { key: "bedId", val: item.bedId },
+    { key: "flatId", val: item.flatId },
+    { key: "uuid", val: item.uuid },
+    { key: "_id", val: item._id },
   ];
   for (const cand of candidates) {
-    if (cand !== undefined && cand !== null && cand !== "") {
-      return String(cand);
+    if (cand.val !== undefined && cand.val !== null && cand.val !== "") {
+      return String(cand.val);
     }
   }
   return "";
@@ -131,9 +124,6 @@ export default function AddTenantScreen() {
     }
     return null;
   }, [params]);
-
-  // Current Tenant's existing bed ID for edit mode validation bypass
-  const currentTenantBedId = isEditing ? parsedTenantData?.bedId : null;
 
   // Tenant Details
   const [name, setName] = useState("");
@@ -173,9 +163,11 @@ export default function AddTenantScreen() {
   const [tenantPhoto, setTenantPhoto] = useState<Attachment | null>(null);
 
   useEffect(() => {
+    console.log("🚀 [SCREEN MOUNTED] Initializing AddTenantScreen...");
     fetchFlatsData();
 
     if (isEditing && parsedTenantData) {
+      console.log("✏️ [EDIT MODE]: Pre-filling tenant data...");
       setName(parsedTenantData.name || "");
       setPhone(parsedTenantData.phone || "");
       setEmail(parsedTenantData.email || "");
@@ -207,17 +199,6 @@ export default function AddTenantScreen() {
       setPoliceVerificationStatus(
         parsedTenantData.policeVerificationStatus || "NOT_STARTED",
       );
-
-      const typeMapping: Record<number, AllocationType> = {
-        1: "FULL_FLAT",
-        2: "ROOM",
-        3: "BED",
-      };
-      if (parsedTenantData.allocationType) {
-        setAllocationType(
-          typeMapping[parsedTenantData.allocationType] || "FULL_FLAT",
-        );
-      }
     }
   }, []);
 
@@ -226,10 +207,6 @@ export default function AddTenantScreen() {
   // =========================================================
 
   const isBedOccupied = (bed: Bed): boolean => {
-    // Agar ye wahi bed hai jo is tenant ke paas pehle se allocated tha, toh occupied mat maano
-    if (currentTenantBedId && areEntitiesEqual(bed.id || bed.bedId, currentTenantBedId)) {
-      return false;
-    }
     return bed.isOccupied === true || bed.status === 2;
   };
 
@@ -237,7 +214,11 @@ export default function AddTenantScreen() {
     if (!room) return [];
 
     const actualBeds =
-      room.beds || room.bedBreakup || room.zoneBeds || room.roomBeds || [];
+      room.beds ||
+      room.bedBreakup ||
+      room.zoneBeds ||
+      room.roomBeds ||
+      [];
 
     if (actualBeds.length > 0) {
       return actualBeds.map((bed, index) => ({
@@ -246,6 +227,7 @@ export default function AddTenantScreen() {
       }));
     }
 
+    // Fallback when API sends capacity but not the bed array.
     if (room.capacity && room.capacity > 0) {
       const perBedRent = Math.round(
         (room.roomRent || room.rent || 0) / room.capacity,
@@ -263,16 +245,28 @@ export default function AddTenantScreen() {
     return [];
   };
 
+  // Room allocation is allowed only when the WHOLE room is free.
+  // One occupied bed makes the room unavailable for ROOM allocation,
+  // but the remaining vacant beds are still available for BED allocation.
   const isRoomFullyBooked = (room: Room): boolean => {
     const beds = getRoomBeds(room);
-    if (room.isOccupied === true || room.status === 2) return true;
-    if (beds.length === 0) return false;
+
+    if (room.isOccupied === true || room.status === 2) {
+      return true;
+    }
+
+    if (beds.length === 0) {
+      return false;
+    }
+
     return beds.every(isBedOccupied);
   };
 
   const isRoomPartiallyBooked = (room: Room): boolean => {
     const beds = getRoomBeds(room);
+
     if (beds.length === 0) return false;
+
     const occupiedCount = beds.filter(isBedOccupied).length;
     return occupiedCount > 0 && occupiedCount < beds.length;
   };
@@ -281,16 +275,28 @@ export default function AddTenantScreen() {
     return getRoomBeds(room).filter((bed) => !isBedOccupied(bed)).length;
   };
 
+  // Flat is fully booked only when EVERY room is fully booked.
+  // A partially occupied flat remains available for ROOM/BED allocation.
   const isFlatFullyBooked = (flat: Flat): boolean => {
     const rooms = flat.roomBreakup || flat.zones || [];
-    if (rooms.length === 0) return false;
+
+    if (rooms.length === 0) {
+      return false;
+    }
+
     return rooms.every((room) => isRoomFullyBooked(room));
   };
 
+  // FULL FLAT allocation is allowed only when there is no occupied
+  // room or bed anywhere inside the flat.
   const isFlatPartiallyOrFullyBooked = (flat: Flat): boolean => {
     const rooms = flat.roomBreakup || flat.zones || [];
+
     return rooms.some((room) => {
-      if (room.isOccupied === true || room.status === 2) return true;
+      if (room.isOccupied === true || room.status === 2) {
+        return true;
+      }
+
       return getRoomBeds(room).some(isBedOccupied);
     });
   };
@@ -298,6 +304,7 @@ export default function AddTenantScreen() {
   const getAvailableRooms = (flat: Flat | null): Room[] => {
     if (!flat) return [];
     const rawRooms = flat.roomBreakup || flat.zones || [];
+
     return rawRooms.map((room, index) => ({
       ...room,
       id: room.id || room.zoneId || room.roomId || index + 1,
@@ -325,66 +332,21 @@ export default function AddTenantScreen() {
 
       setFlats(flatList);
 
-      if (flatList.length > 0) {
-        let targetFlat = flatList[0];
+      if (flatList.length > 0 && !selectedFlat) {
+        const firstFlat =
+          flatList.find((f) => !isFlatFullyBooked(f)) || flatList[0];
+        setSelectedFlat(firstFlat);
 
-        // 1. Handle Flat Selection in Edit Mode
-        if (isEditing && parsedTenantData?.flatId) {
-          const matched = flatList.find((f) =>
-            areEntitiesEqual(f.id || f.flatId, parsedTenantData.flatId),
-          );
-          if (matched) targetFlat = matched;
-        } else {
-          targetFlat =
-            flatList.find((f) => !isFlatFullyBooked(f)) || flatList[0];
-        }
+        const flatHasOccupiedUnit = isFlatPartiallyOrFullyBooked(firstFlat);
 
-        setSelectedFlat(targetFlat);
+        // If anything is already occupied, FULL_FLAT is not a valid default.
+        setAllocationType(flatHasOccupiedUnit ? "BED" : "FULL_FLAT");
 
-        // 2. Handle Allocation Type properly for Edit Mode vs Normal Mode
-        if (isEditing && parsedTenantData?.allocationType) {
-          const rawType = parsedTenantData.allocationType;
-          let resolvedType: AllocationType = "FULL_FLAT";
-
-          if (rawType === 1 || rawType === "1" || rawType === "FULL_FLAT") {
-            resolvedType = "FULL_FLAT";
-          } else if (rawType === 2 || rawType === "2" || rawType === "ROOM") {
-            resolvedType = "ROOM";
-          } else if (rawType === 3 || rawType === "3" || rawType === "BED") {
-            resolvedType = "BED";
-          }
-          setAllocationType(resolvedType);
-        } else {
-          const flatHasOccupiedUnit = isFlatPartiallyOrFullyBooked(targetFlat);
-          setAllocationType(flatHasOccupiedUnit ? "BED" : "FULL_FLAT");
-        }
-
-        // 3. Handle Room Selection
-        const rooms = getAvailableRooms(targetFlat);
+        const rooms = getAvailableRooms(firstFlat);
         if (rooms.length > 0) {
-          let targetRoom = rooms[0];
-          if (isEditing && parsedTenantData?.roomId) {
-            const matchedRoom = rooms.find((r) =>
-              areEntitiesEqual(
-                r.id || r.zoneId || r.roomId,
-                parsedTenantData.roomId,
-              ),
-            );
-            if (matchedRoom) targetRoom = matchedRoom;
-          } else {
-            targetRoom =
-              rooms.find((room) => !isRoomFullyBooked(room)) || rooms[0];
-          }
-          setSelectedRoom(targetRoom);
-
-          // 4. Handle Bed Selection
-          if (isEditing && parsedTenantData?.bedId) {
-            const beds = getRoomBeds(targetRoom);
-            const matchedBed = beds.find((b) =>
-              areEntitiesEqual(b.id || b.bedId, parsedTenantData.bedId),
-            );
-            if (matchedBed) setSelectedBed(matchedBed);
-          }
+          const firstAvailableRoom =
+            rooms.find((room) => !isRoomFullyBooked(room)) || rooms[0];
+          setSelectedRoom(firstAvailableRoom);
         }
       }
     } catch (error: any) {
@@ -506,22 +468,53 @@ export default function AddTenantScreen() {
       return;
     }
 
-    if (allocationType === "ROOM" && !selectedRoom) {
-      Alert.alert("Room Required", "Please select a room for room allocation.");
-      return;
+    // ---------------------------------------------------------
+    // FINAL CLIENT-SIDE BOOKING VALIDATION
+    // ---------------------------------------------------------
+    // FULL_FLAT: absolutely nothing inside the flat can be occupied.
+    if (allocationType === "FULL_FLAT") {
+      if (isFlatPartiallyOrFullyBooked(selectedFlat)) {
+        Alert.alert(
+          "Flat Not Available",
+          "This flat already has a booked room/bed. You can only book a fully vacant room or an available bed.",
+        );
+        return;
+      }
     }
 
+    // ROOM: the selected room must have ZERO occupied beds.
+    if (allocationType === "ROOM") {
+      if (!selectedRoom) {
+        Alert.alert("Room Required", "Please select a room.");
+        return;
+      }
+
+      if (isRoomFullyBooked(selectedRoom) || isRoomPartiallyBooked(selectedRoom)) {
+        Alert.alert(
+          "Room Not Available",
+          "This room already has a booked bed. You can only book an entirely vacant room or select an available bed.",
+        );
+        return;
+      }
+    }
+
+    // BED: only the selected vacant bed can be booked.
     if (allocationType === "BED") {
       if (!selectedRoom) {
         Alert.alert("Room Required", "Please select a room.");
         return;
       }
+
       if (!selectedBed) {
         Alert.alert("Bed Required", "Please select an available bed.");
         return;
       }
+
       if (isBedOccupied(selectedBed)) {
-        Alert.alert("Bed Not Available", "This bed is already booked.");
+        Alert.alert(
+          "Bed Not Available",
+          "This bed is already booked. Please select another available bed.",
+        );
         return;
       }
     }
@@ -590,7 +583,9 @@ export default function AddTenantScreen() {
 
       if (isEditing) {
         const tenantId = parsedTenantData?.id || parsedTenantData?._id;
+        // ✅ Yahan idProof aur tenantPhoto pass karein
         await updateTenantApi(tenantId, tenantPayload, idProof, tenantPhoto);
+        
         Alert.alert("Success", "Tenant updated successfully!", [
           { text: "OK", onPress: () => router.back() },
         ]);
@@ -610,11 +605,8 @@ export default function AddTenantScreen() {
     }
   };
 
-  const currentRooms = useMemo(
-    () => getAvailableRooms(selectedFlat),
-    [selectedFlat],
-  );
-  const currentBeds = useMemo(() => getRoomBeds(selectedRoom), [selectedRoom]);
+  const currentRooms = getAvailableRooms(selectedFlat);
+  const currentBeds = getRoomBeds(selectedRoom);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -711,12 +703,16 @@ export default function AddTenantScreen() {
               style={styles.horizontalScroll}
             >
               {flats.map((flat, index) => {
-                const flatId = getEntityId(flat) || `flat-${index}`;
-                const isSelected = areEntitiesEqual(
-                  selectedFlat?.id || selectedFlat?.flatId,
-                  flat.id || flat.flatId,
-                );
+                const flatId =
+                  getEntityId(flat, `FLAT_CHIP_${index}`) || `flat-${index}`;
+                const isSelected = selectedFlat?.id === flat.id;
+
+                // IMPORTANT:
+                // One occupied bed does NOT disable the whole flat.
+                // The flat is disabled only when every room is fully booked.
                 const isBooked = isFlatFullyBooked(flat);
+                const hasAnyOccupiedUnit =
+                  isFlatPartiallyOrFullyBooked(flat);
                 const tenantLabel = flat.tenantName || flat.currentTenant;
 
                 return (
@@ -731,8 +727,11 @@ export default function AddTenantScreen() {
                     onPress={() => {
                       if (!isBooked) {
                         setSelectedFlat(flat);
+
                         const flatHasOccupiedUnit =
                           isFlatPartiallyOrFullyBooked(flat);
+
+                        // Partial/full occupancy means FULL_FLAT is not allowed.
                         setAllocationType(
                           flatHasOccupiedUnit ? "BED" : "FULL_FLAT",
                         );
@@ -742,10 +741,12 @@ export default function AddTenantScreen() {
                           const firstAvailableRoom =
                             rooms.find((room) => !isRoomFullyBooked(room)) ||
                             rooms[0];
+
                           setSelectedRoom(firstAvailableRoom);
                         } else {
                           setSelectedRoom(null);
                         }
+
                         setSelectedBed(null);
                       }
                     }}
@@ -775,7 +776,7 @@ export default function AddTenantScreen() {
                         <Text style={styles.chipBookedSub}>
                           {tenantLabel
                             ? `Booked: ${tenantLabel}`
-                            : "Fully Booked"}
+                            : "Partially/Fully Booked"}
                         </Text>
                       )}
                     </View>
@@ -790,6 +791,7 @@ export default function AddTenantScreen() {
             <View style={{ marginTop: SPACING.md }}>
               <Text style={TYPOGRAPHY.label}>Allocation Type</Text>
               <View style={styles.tabContainer}>
+                {/* Full Flat is allowed ONLY when nothing in the flat is occupied. */}
                 {!isFlatPartiallyOrFullyBooked(selectedFlat) && (
                   <TouchableOpacity
                     style={[
@@ -865,20 +867,23 @@ export default function AddTenantScreen() {
                     </Text>
                   ) : (
                     currentRooms.map((room, roomIndex) => {
-                      const roomKey = getEntityId(room) || `room-${roomIndex}`;
+                      const roomKey =
+                        getEntityId(room, `ROOM_CARD_${roomIndex}`) ||
+                        `room-${roomIndex}`;
                       const roomName =
                         room.zoneName ||
                         room.roomName ||
                         room.name ||
                         `Room ${roomIndex + 1}`;
 
-                      const isSelected = areEntitiesEqual(
-                        selectedRoom?.id ||
-                          selectedRoom?.zoneId ||
-                          selectedRoom?.roomId,
-                        room.id || room.zoneId || room.roomId,
-                      );
+                      const roomBeds = getRoomBeds(room);
+                      const isSelected =
+                        selectedRoom?.id === room.id ||
+                        selectedRoom?.zoneName === roomName;
                       const roomRent = room.roomRent || room.rent || 0;
+
+                      // FULL ROOM is disabled if even one bed is occupied.
+                      // That occupied room can still be used for BED allocation.
                       const isOccupied = isRoomFullyBooked(room);
                       const isPartiallyBooked = isRoomPartiallyBooked(room);
                       const availableBedCount = getAvailableBedCount(room);
@@ -925,16 +930,13 @@ export default function AddTenantScreen() {
                               </Text>
                             ) : isPartiallyBooked ? (
                               <Text style={styles.availableSubText}>
-                                {availableBedCount} bed
-                                {availableBedCount !== 1 ? "s" : ""} available
+                                {availableBedCount} bed{availableBedCount !== 1 ? "s" : ""} available • Full Room unavailable
                               </Text>
                             ) : null}
                           </View>
                           <View style={styles.cardActionContainer}>
                             {isOccupied ? (
-                              <Text style={styles.occupiedText}>
-                                Fully Booked
-                              </Text>
+                              <Text style={styles.occupiedText}>Fully Booked</Text>
                             ) : isSelected ? (
                               <Ionicons
                                 name="checkmark-circle"
@@ -957,8 +959,7 @@ export default function AddTenantScreen() {
           {selectedRoom && allocationType === "BED" && (
             <View style={{ marginTop: SPACING.sm }}>
               <Text style={TYPOGRAPHY.label}>
-                Select Bed in{" "}
-                {selectedRoom.zoneName || selectedRoom.roomName || "Room"}
+                Select Bed in {selectedRoom.zoneName || "Room"}
               </Text>
 
               <ScrollView
@@ -972,15 +973,16 @@ export default function AddTenantScreen() {
                   </Text>
                 ) : (
                   currentBeds.map((bed, bedIndex) => {
-                    const bedKey = getEntityId(bed) || `bed-${bedIndex}`;
-                    const isSelected = areEntitiesEqual(
-                      selectedBed?.id || selectedBed?.bedId,
-                      bed.id || bed.bedId,
-                    );
+                    const bedKey =
+                      getEntityId(bed, `BED_CARD_${bedIndex}`) ||
+                      `bed-${bedIndex}`;
+                    const isSelected =
+                      selectedBed?.id === bed.id || selectedBed === bed;
                     const bedName =
                       bed.bedNumber || bed.bedNo || `Bed ${bedIndex + 1}`;
                     const bedRent = bed.bedRent || bed.rent || 0;
-                    const isOccupied = isBedOccupied(bed);
+                    const isOccupied =
+                      bed.isOccupied === true || bed.status === 2;
                     const tenantLabel = bed.tenantName || bed.currentTenant;
 
                     return (
@@ -1359,8 +1361,8 @@ const styles = StyleSheet.create({
   horizontalScroll: { marginBottom: SPACING.md },
   itemTitle: { fontSize: 14, fontWeight: "500", color: COLORS.textPrimary },
   subText: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
-  selectedBorder: { borderColor: COLORS.accent, borderWidth: 1.5, margin: -0.5 },
-  selectedSuccessBorder: { borderColor: COLORS.success, borderWidth: 1.5, margin: -0.5 },
+  selectedBorder: { borderColor: COLORS.accent, borderWidth: 1.5 },
+  selectedSuccessBorder: { borderColor: COLORS.success, borderWidth: 1.5 },
   disabledCard: {
     opacity: 0.6,
     backgroundColor: COLORS.border + "44",
@@ -1381,6 +1383,12 @@ const styles = StyleSheet.create({
   },
   chipBookedSub: {
     color: "#E53935",
+    fontSize: 10,
+    marginTop: 2,
+    fontWeight: "600",
+  },
+  chipAvailableSub: {
+    color: COLORS.accent,
     fontSize: 10,
     marginTop: 2,
     fontWeight: "600",

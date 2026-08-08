@@ -56,7 +56,7 @@ export default function LoginScreen() {
           headers: {
             "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       console.log("STEP 3: OTP Sent Successfully");
@@ -77,7 +77,7 @@ export default function LoginScreen() {
 
       const serverMessage = e?.response?.data?.message;
       setError(
-        serverMessage || "Mobile number not registered or account is inactive."
+        serverMessage || "Mobile number not registered or account is inactive.",
       );
     } finally {
       setLoading(false);
@@ -114,7 +114,7 @@ export default function LoginScreen() {
           headers: {
             "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       console.log("STEP 3: Login Successful");
@@ -149,19 +149,12 @@ export default function LoginScreen() {
         console.log("STEP 4: Navigating based on Role:", userRole);
 
         // Role-based navigation redirect
-        if(userRole === "Admin"){
-
-        }
-        else if (
-          userRole === "Admin" ||
-          userRole === "SuperAdmin" ||
-          userRole === "Staff"
-        ) {
+        if (userRole === "SuperAdmin") {
+          router.replace("/(Superadmin)" as any);
+        } else if (userRole === "Admin" || userRole === "Staff") {
           router.replace("/(tabs)" as any);
         } else if (userRole === "User") {
           router.replace("/(tenant)" as any);
-        } else {
-          router.replace("/(tabs)" as any);
         }
       } else {
         setError("Invalid response from server. Token missing.");
