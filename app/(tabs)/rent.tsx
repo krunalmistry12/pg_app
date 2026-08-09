@@ -1,10 +1,14 @@
-import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
-import React, { useEffect, useMemo, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
+import React, { useCallback, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
   Linking,
   Modal,
   Pressable,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -16,7 +20,11 @@ import {
   View,
 } from "react-native";
 
-interface RentItem {
+import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
+import api from "@/src/services/api";
+
+// --- Types & Interfaces ---
+export interface RentItem {
   id: string;
   tenant: string;
   phone?: string;
@@ -27,68 +35,7 @@ interface RentItem {
   year: string;
 }
 
-const initialRents: RentItem[] = [
-  {
-    id: "1",
-    tenant: "Rahul Sharma",
-    phone: "9876543210",
-    amount: 6500,
-    status: "Paid",
-    room: "101",
-    month: "Jul",
-    year: "2026",
-  },
-  {
-    id: "2",
-    tenant: "Amit Patel",
-    phone: "9876543211",
-    amount: 7000,
-    status: "Due",
-    room: "205",
-    month: "Jul",
-    year: "2026",
-  },
-  {
-    id: "3",
-    tenant: "Priya Shah",
-    phone: "9876543212",
-    amount: 6000,
-    status: "Paid",
-    room: "301",
-    month: "Jul",
-    year: "2026",
-  },
-  {
-    id: "4",
-    tenant: "Vikram Malhotra",
-    phone: "9876543213",
-    amount: 8500,
-    status: "Due",
-    room: "402",
-    month: "Jul",
-    year: "2026",
-  },
-  {
-    id: "5",
-    tenant: "Karan Mehta",
-    phone: "9876543214",
-    amount: 7500,
-    status: "Paid",
-    room: "102",
-    month: "Jul",
-    year: "2024",
-  },
-  {
-    id: "6",
-    tenant: "Suresh Raina",
-    phone: "9876543215",
-    amount: 6000,
-    status: "Paid",
-    room: "201",
-    month: "Jul",
-    year: "2026",
-  },
-];
+type FilterTab = "All" | "Paid" | "Due";
 
 const ALL_MONTHS = [
   "Jan",
@@ -105,10 +52,11 @@ const ALL_MONTHS = [
   "Dec",
 ];
 
-type FilterTab = "All" | "Paid" | "Due";
-
 export default function RentManagement() {
-  const [rents, setRents] = useState<RentItem[]>(initialRents);
+  const [rents, setRents] = useState<RentItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+
   const [searchRoom, setSearchRoom] = useState<string>("");
   const [statusTab, setStatusTab] = useState<FilterTab>("All");
   const [selectedTenant, setSelectedTenant] = useState<RentItem | null>(null);
@@ -121,50 +69,137 @@ export default function RentManagement() {
   const { width } = useWindowDimensions();
   const isCompactScreen = width < 380;
 
+  const currentYearStr = new Date().getFullYear().toString();
+  const [selectedYear, setSelectedYear] = useState<string>(currentYearStr);
+  const [selectedMonth, setSelectedMonth] = useState<string>(
+    ALL_MONTHS[new Date().getMonth()],
+  );
+
   const availableYears = useMemo(() => {
     const existingYears = rents.map((r) => r.year).filter(Boolean);
-    const uniqueYears = Array.from(new Set(existingYears));
+    const uniqueYears = Array.from(new Set([currentYearStr, ...existingYears]));
     return uniqueYears.sort((a, b) => Number(b) - Number(a));
-  }, [rents]);
+  }, [rents, currentYearStr]);
+ 
+  // =========================================================================
+  // 🌐 API CALL: Fetch Rent Records
+  // =========================================================================
+  const fetchRentRecords = useCallback(async () => {
+    try {
+      setLoading(true);
+      const monthIndex = ALL_MONTHS.indexOf(selectedMonth) + 1;
 
-  const [selectedYear, setSelectedYear] = useState<string>(
-    availableYears[0] || "2026",
-  );
-  const [selectedMonth, setSelectedMonth] = useState<string>("Jul");
+      // C# Enum mapping for API parameter (1 = PAID, 2 = PENDING)
+      let statusParam: number | string | undefined = undefined;
+      if (statusTab === "Paid") statusParam = 1;
+      if (statusTab === "Due") statusParam = 2;
 
-  useEffect(() => {
-    if (availableYears.length > 0 && !availableYears.includes(selectedYear)) {
-      setSelectedYear(availableYears[0]);
+      const response = await api.get("/Rent/admin/all-records", {
+        params: {
+          month: monthIndex,
+          year: selectedYear,
+          status: statusParam,
+          search: searchRoom.trim() || undefined,
+        },
+      });
+
+      if (response.data?.success) {
+        const mappedData: RentItem[] = (response.data.data || []).map(
+          (item: any) => {
+            // C# Enum Check: 1 = PAID, 2 = PENDING, 3 = PARTIAL, 4 = OVERDUE
+            const rawStatus = item.status ?? item.paymentStatus;
+            const isPaid =
+              rawStatus === 1 ||
+              rawStatus === "1" ||
+              String(rawStatus).toUpperCase() === "PAID" ||
+              item.isPaid === true;
+
+            return {
+              id: String(item.id || item.rentId || Math.random()),
+              tenant: item.tenantName || item.tenant || "Unknown",
+              phone: item.phoneNumber || item.phone || "",
+              amount: Number(item.amount || item.totalAmount || 0),
+              status: isPaid ? "Paid" : "Due",
+              room: String(item.roomNumber || item.room || "N/A"),
+              month: item.monthName || selectedMonth,
+              year: String(item.year || selectedYear),
+            };
+          },
+        );
+
+        setRents(mappedData);
+      } else {
+        Alert.alert(
+          "Error",
+          response.data?.message || "Failed to fetch rent records.",
+        );
+      }
+    } catch (error: any) {
+      console.error("Error fetching rent records:", error);
+      Alert.alert(
+        "Error",
+        error?.response?.data?.message ||
+          "Network error while loading rent records.",
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-  }, [availableYears, selectedYear]);
+  }, [selectedMonth, selectedYear, statusTab, searchRoom]);
 
-  const toggleStatus = (id: string) => {
-    if (!id) return;
-    setRents((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? { ...item, status: item.status === "Paid" ? "Due" : "Paid" }
-          : item,
-      ),
-    );
-    setSelectedTenant(null);
+  useFocusEffect(
+    useCallback(() => {
+      fetchRentRecords();
+    }, [fetchRentRecords]),
+  );
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchRentRecords();
+  }, [fetchRentRecords]);
+
+  // =========================================================================
+  // 🌐 API CALL: Record Payment
+  // =========================================================================
+  const handleRecordPayment = async (item: RentItem) => {
+    try {
+      const response = await api.post("/Rent/record-payment", {
+        rentId: item.id,
+        amountPaid: item.amount,
+        paymentMode: "Cash",
+      });
+
+      if (response.data?.success) {
+        Alert.alert("Success", "Payment recorded successfully!");
+        setSelectedTenant(null);
+        fetchRentRecords();
+      } else {
+        Alert.alert(
+          "Error",
+          response.data?.message || "Failed to record payment.",
+        );
+      }
+    } catch (error: any) {
+      console.error("Error recording payment:", error);
+      Alert.alert(
+        "Error",
+        error?.response?.data?.message ||
+          "Something went wrong while recording payment.",
+      );
+    }
   };
 
-  const filteredRents = rents.filter((item) => {
-    const matchesYear = item.year === selectedYear;
-    const matchesMonth = item.month === selectedMonth;
-    const matchesTab = statusTab === "All" || item.status === statusTab;
-    const searchLower = searchRoom.trim().toLowerCase();
-    const matchesSearch =
-      item.room.toLowerCase().includes(searchLower) ||
-      item.tenant.toLowerCase().includes(searchLower);
+  const toggleStatus = (tenantItem: RentItem) => {
+    if (tenantItem.status === "Due") {
+      handleRecordPayment(tenantItem);
+    } else {
+      Alert.alert("Notice", "Reversing paid records is restricted.");
+      setSelectedTenant(null);
+    }
+  };
 
-    return matchesYear && matchesMonth && matchesTab && matchesSearch;
-  });
-
-  const periodRents = rents.filter(
-    (r) => r.year === selectedYear && r.month === selectedMonth,
-  );
+  // Analytics Calculations
+  const periodRents = rents;
   const totalCollected = periodRents
     .filter((r) => r.status === "Paid")
     .reduce((sum, r) => sum + r.amount, 0);
@@ -179,7 +214,7 @@ export default function RentManagement() {
 
   const executeWhatsAppSend = (phoneToUse: string, item: RentItem) => {
     if (!phoneToUse.trim()) {
-      alert("Please provide a valid phone number!");
+      Alert.alert("Validation", "Please provide a valid phone number!");
       return;
     }
     const cleanPhone = phoneToUse.replace(/[^0-9]/g, "");
@@ -193,15 +228,15 @@ export default function RentManagement() {
     const url = `https://wa.me/${formattedPhone}?text=${message}`;
 
     Linking.openURL(url).catch(() => {
-      alert("WhatsApp is not installed or unable to open link.");
+      Alert.alert("Error", "WhatsApp is not installed or unable to open link.");
     });
     setWhatsappTarget(null);
   };
 
   const sendBulkWhatsAppReminders = () => {
-    const dueItems = periodRents.filter((r) => r.status === "Due");
+    const dueItems = rents.filter((r) => r.status === "Due");
     if (dueItems.length === 0) {
-      alert("No pending dues found for this month!");
+      Alert.alert("Info", "No pending dues found for this selection!");
       return;
     }
 
@@ -218,7 +253,6 @@ export default function RentManagement() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bgDark} />
 
-      {/* Main Scrollable Content Container to prevent edge clipping */}
       <View style={styles.contentWrapper}>
         {/* Header Bar */}
         <View style={styles.header}>
@@ -233,9 +267,21 @@ export default function RentManagement() {
             onPress={() => setIsMonthPickerVisible(true)}
             activeOpacity={0.8}
           >
+            <Ionicons
+              name="calendar-outline"
+              size={14}
+              color={COLORS.accent}
+              style={{ marginRight: 4 }}
+            />
             <Text style={styles.monthPillText}>
-              📅 {selectedMonth} {selectedYear} ▾
+              {selectedMonth} {selectedYear}
             </Text>
+            <Ionicons
+              name="chevron-down"
+              size={12}
+              color={COLORS.accent}
+              style={{ marginLeft: 4 }}
+            />
           </TouchableOpacity>
         </View>
 
@@ -309,7 +355,12 @@ export default function RentManagement() {
         {/* Search & Status Filter Section */}
         <View style={styles.filterSection}>
           <View style={styles.searchBox}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            <Ionicons
+              name="search"
+              size={16}
+              color={COLORS.textMuted}
+              style={{ marginRight: 8 }}
+            />
             <TextInput
               style={styles.searchInput}
               placeholder="Search tenant or room..."
@@ -319,7 +370,11 @@ export default function RentManagement() {
             />
             {searchRoom.length > 0 && (
               <TouchableOpacity onPress={() => setSearchRoom("")}>
-                <Text style={{ color: COLORS.textSecondary }}>✕</Text>
+                <Ionicons
+                  name="close-circle"
+                  size={16}
+                  color={COLORS.textMuted}
+                />
               </TouchableOpacity>
             )}
           </View>
@@ -361,108 +416,142 @@ export default function RentManagement() {
                 style={styles.bulkRemindBtn}
                 onPress={sendBulkWhatsAppReminders}
               >
-                <Text style={styles.bulkRemindText}>📢 Bulk Remind</Text>
+                <Ionicons
+                  name="megaphone-outline"
+                  size={14}
+                  color={COLORS.textWhite}
+                  style={{ marginRight: 4 }}
+                />
+                <Text style={styles.bulkRemindText}>Bulk Remind</Text>
               </TouchableOpacity>
             )}
           </View>
         </View>
 
-        {/* Tenants List */}
-        <FlatList
-          data={filteredRents}
-          keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: SPACING.xxl }}
-          ListEmptyComponent={
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyIcon}>📋</Text>
-              <Text style={styles.emptyTitle}>No Tenant Records</Text>
-              <Text style={styles.emptySub}>
-                No {statusTab !== "All" ? statusTab.toLowerCase() : ""} records
-                for {selectedMonth} {selectedYear} matching "{searchRoom}".
-              </Text>
-            </View>
-          }
-          renderItem={({ item }) => {
-            const isPaid = item.status === "Paid";
-            return (
-              <View style={styles.tenantCard}>
-                <View style={styles.cardHeader}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: SPACING.sm,
-                    }}
-                  >
-                    <View style={styles.roomTag}>
-                      <Text style={styles.roomTagText}>ROOM {item.room}</Text>
+        {/* Tenants List / Loading */}
+        {loading && !refreshing ? (
+          <View
+            style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
+          >
+            <ActivityIndicator size="large" color={COLORS.accent} />
+            <Text style={{ color: COLORS.textMuted, marginTop: 8 }}>
+              Fetching rent records...
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={rents}
+            keyExtractor={(item) => item.id}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: SPACING.xxl }}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={COLORS.accent}
+              />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyCard}>
+                <Ionicons
+                  name="document-text-outline"
+                  size={40}
+                  color={COLORS.textMuted}
+                />
+                <Text style={styles.emptyTitle}>No Tenant Records</Text>
+                <Text style={styles.emptySub}>
+                  No {statusTab !== "All" ? statusTab.toLowerCase() : ""}{" "}
+                  records for {selectedMonth} {selectedYear} matching "
+                  {searchRoom}".
+                </Text>
+              </View>
+            }
+            renderItem={({ item }) => {
+              const isPaid = item.status === "Paid";
+              return (
+                <View style={styles.tenantCard}>
+                  <View style={styles.cardHeader}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: SPACING.sm,
+                      }}
+                    >
+                      <View style={styles.roomTag}>
+                        <Text style={styles.roomTagText}>ROOM {item.room}</Text>
+                      </View>
+
+                      {!isPaid && (
+                        <TouchableOpacity
+                          style={styles.remindIconBtn}
+                          onPress={() => {
+                            setWhatsappTarget(item);
+                            setCustomPhoneInput(item.phone || "");
+                          }}
+                        >
+                          <Ionicons
+                            name="logo-whatsapp"
+                            size={14}
+                            color={COLORS.success}
+                          />
+                        </TouchableOpacity>
+                      )}
                     </View>
 
-                    {!isPaid && (
-                      <TouchableOpacity
-                        style={styles.remindIconBtn}
-                        onPress={() => {
-                          setWhatsappTarget(item);
-                          setCustomPhoneInput(item.phone || "");
-                        }}
-                      >
-                        <Text style={{ fontSize: 12 }}>💬</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      isPaid ? styles.paidBadge : styles.dueBadge,
-                    ]}
-                  >
                     <View
                       style={[
-                        styles.statusDot,
-                        isPaid ? styles.paidDot : styles.dueDot,
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        styles.statusText,
-                        isPaid ? styles.paidText : styles.dueText,
+                        styles.statusBadge,
+                        isPaid ? styles.paidBadge : styles.dueBadge,
                       ]}
                     >
-                      {item.status}
-                    </Text>
+                      <View
+                        style={[
+                          styles.statusDot,
+                          isPaid ? styles.paidDot : styles.dueDot,
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.statusText,
+                          isPaid ? styles.paidText : styles.dueText,
+                        ]}
+                      >
+                        {item.status}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.cardBody}>
+                    <View>
+                      <Text style={styles.tenantName}>{item.tenant}</Text>
+                      <TouchableOpacity onPress={() => setHistoryTenant(item)}>
+                        <Text style={styles.historyLinkText}>
+                          View History ↗
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={styles.amountText}>
+                        ₹{item.amount.toLocaleString()}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.manageBtn}
+                        onPress={() => setSelectedTenant(item)}
+                      >
+                        <Text style={styles.manageBtnText}>Action ›</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
-
-                <View style={styles.cardBody}>
-                  <View>
-                    <Text style={styles.tenantName}>{item.tenant}</Text>
-                    <TouchableOpacity onPress={() => setHistoryTenant(item)}>
-                      <Text style={styles.historyLinkText}>View History ↗</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={{ alignItems: "flex-end" }}>
-                    <Text style={styles.amountText}>
-                      ₹{item.amount.toLocaleString()}
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.manageBtn}
-                      onPress={() => setSelectedTenant(item)}
-                    >
-                      <Text style={styles.manageBtnText}>Action ›</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            );
-          }}
-        />
+              );
+            }}
+          />
+        )}
       </View>
 
-      {/* Modals */}
-      {/* WhatsApp Contact Picker Modal */}
+      {/* WhatsApp Modal */}
       <Modal
         visible={!!whatsappTarget}
         transparent
@@ -487,9 +576,7 @@ export default function RentManagement() {
                 style={styles.closeIconBtn}
                 onPress={() => setWhatsappTarget(null)}
               >
-                <Text style={{ color: COLORS.textPrimary, fontWeight: "700" }}>
-                  ✕
-                </Text>
+                <Ionicons name="close" size={20} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
 
@@ -544,7 +631,10 @@ export default function RentManagement() {
               </Text>
               <View style={{ flexDirection: "row", gap: SPACING.sm }}>
                 <TextInput
-                  style={[styles.searchInput, { flex: 1, height: 40 }]}
+                  style={[
+                    styles.searchInput,
+                    { flex: 1, height: 40, paddingHorizontal: 10 },
+                  ]}
                   placeholder="Enter 10-digit number"
                   placeholderTextColor={COLORS.textMuted}
                   keyboardType="phone-pad"
@@ -608,9 +698,11 @@ export default function RentManagement() {
                       {m}
                     </Text>
                     {isSelected && (
-                      <Text style={{ color: COLORS.accent, fontWeight: "700" }}>
-                        ✓
-                      </Text>
+                      <Ionicons
+                        name="checkmark"
+                        size={18}
+                        color={COLORS.accent}
+                      />
                     )}
                   </TouchableOpacity>
                 );
@@ -620,7 +712,7 @@ export default function RentManagement() {
         </Pressable>
       </Modal>
 
-      {/* Payment History Modal */}
+      {/* History Modal */}
       <Modal
         visible={!!historyTenant}
         transparent
@@ -643,9 +735,7 @@ export default function RentManagement() {
                 style={styles.closeIconBtn}
                 onPress={() => setHistoryTenant(null)}
               >
-                <Text style={{ color: COLORS.textPrimary, fontWeight: "700" }}>
-                  ✕
-                </Text>
+                <Ionicons name="close" size={20} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
 
@@ -692,7 +782,7 @@ export default function RentManagement() {
         </Pressable>
       </Modal>
 
-      {/* Tenant Action Sheet Modal */}
+      {/* Action Sheet Modal */}
       <Modal
         visible={!!selectedTenant}
         transparent
@@ -717,7 +807,7 @@ export default function RentManagement() {
                   ? styles.btnWarning
                   : styles.btnSuccess,
               ]}
-              onPress={() => selectedTenant && toggleStatus(selectedTenant.id)}
+              onPress={() => selectedTenant && toggleStatus(selectedTenant)}
             >
               <Text style={styles.actionSubmitText}>
                 {selectedTenant?.status === "Paid"
@@ -740,13 +830,10 @@ export default function RentManagement() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
+  container: { flex: 1, backgroundColor: COLORS.background },
   contentWrapper: {
     flex: 1,
-    paddingHorizontal: SPACING.lg, // Yeh ensure karega ki side se content chipke nahi
+    paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.md,
   },
   header: {
@@ -761,27 +848,19 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 1.2,
   },
-  title: {
-    color: COLORS.textPrimary,
-    fontSize: 22,
-    fontWeight: "700",
-  },
+  title: { color: COLORS.textPrimary, fontSize: 22, fontWeight: "700" },
   monthPill: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: COLORS.surface,
-    paddingHorizontal: SPACING.lg,
+    paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderRadius: RADIUS.full,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  monthPillText: {
-    color: COLORS.accent,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  yearRow: {
-    marginBottom: SPACING.md,
-  },
+  monthPillText: { color: COLORS.accent, fontSize: 13, fontWeight: "600" },
+  yearRow: { marginBottom: SPACING.md },
   yearChip: {
     backgroundColor: COLORS.cardBg,
     paddingHorizontal: SPACING.xl,
@@ -795,14 +874,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primaryHover,
     borderColor: COLORS.primary,
   },
-  yearChipText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  activeYearChipText: {
-    color: COLORS.textWhite,
-  },
+  yearChipText: { color: COLORS.textMuted, fontSize: 12, fontWeight: "600" },
+  activeYearChipText: { color: COLORS.textWhite },
   analyticsCard: {
     backgroundColor: COLORS.cardBg,
     borderRadius: RADIUS.xl,
@@ -815,33 +888,32 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: SPACING.sm,
+    marginBottom: SPACING.xs,
   },
   analyticsTitle: {
     color: COLORS.textSecondary,
     fontSize: 12,
     fontWeight: "600",
+    textTransform: "uppercase",
   },
-  progressPercent: {
-    color: COLORS.success,
-    fontSize: 12,
-    fontWeight: "700",
-  },
+  progressPercent: { color: COLORS.accent, fontSize: 13, fontWeight: "700" },
   progressBarTrack: {
     height: 6,
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.full,
+    marginVertical: SPACING.md,
     overflow: "hidden",
-    marginBottom: SPACING.lg,
   },
   progressBarFill: {
     height: "100%",
     backgroundColor: COLORS.success,
+    borderRadius: RADIUS.full,
   },
   metricGrid: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "space-around",
     alignItems: "center",
+    marginTop: SPACING.xs,
   },
   metricLabel: {
     color: COLORS.textMuted,
@@ -849,82 +921,51 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 0.5,
   },
-  metricValue: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginTop: 2,
-  },
-  metricDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: COLORS.border,
-  },
-  filterSection: {
-    marginBottom: SPACING.md,
-    gap: SPACING.sm,
-  },
+  metricValue: { fontSize: 16, fontWeight: "700", marginTop: 2 },
+  metricDivider: { width: 1, height: 24, backgroundColor: COLORS.border },
+  filterSection: { marginBottom: SPACING.lg },
   searchBox: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.cardBg,
+    backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
     paddingHorizontal: SPACING.md,
     height: 42,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.sm,
   },
-  searchIcon: {
-    marginRight: SPACING.sm,
-    fontSize: 12,
-  },
-  searchInput: {
-    flex: 1,
-    color: COLORS.textWhite,
-    fontSize: 13,
-  },
+  searchInput: { flex: 1, color: COLORS.textPrimary, fontSize: 14 },
   segmentedControl: {
     flexDirection: "row",
-    backgroundColor: COLORS.cardBg,
-    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
     padding: 3,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   segmentBtn: {
     flex: 1,
-    paddingVertical: 7,
+    paddingVertical: SPACING.xs,
     alignItems: "center",
-    borderRadius: RADIUS.sm,
-  },
-  segmentBtnActive: {
-    backgroundColor: COLORS.surface,
-  },
-  segmentText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  segmentTextActive: {
-    color: COLORS.textPrimary,
-  },
-  bulkRemindBtn: {
-    backgroundColor: COLORS.warningBackground,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 10,
     borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.warning,
-    justifyContent: "center",
+  },
+  segmentBtnActive: { backgroundColor: COLORS.cardBg },
+  segmentText: { color: COLORS.textMuted, fontSize: 12, fontWeight: "600" },
+  segmentTextActive: { color: COLORS.textPrimary, fontWeight: "700" },
+  bulkRemindBtn: {
+    flexDirection: "row",
     alignItems: "center",
+    backgroundColor: COLORS.accent,
+    paddingHorizontal: SPACING.md,
+    borderRadius: RADIUS.lg,
+    justifyContent: "center",
+    height: 36,
   },
-  bulkRemindText: {
-    color: COLORS.warningText,
-    fontSize: 12,
-    fontWeight: "700",
-  },
+  bulkRemindText: { color: COLORS.textWhite, fontSize: 12, fontWeight: "700" },
   tenantCard: {
     backgroundColor: COLORS.cardBg,
-    borderRadius: RADIUS.xl,
+    borderRadius: RADIUS.lg,
     padding: SPACING.lg,
     marginBottom: SPACING.md,
     borderWidth: 1,
@@ -939,40 +980,32 @@ const styles = StyleSheet.create({
   roomTag: {
     backgroundColor: COLORS.surface,
     paddingHorizontal: SPACING.sm,
-    paddingVertical: 3,
-    borderRadius: RADIUS.sm,
-  },
-  roomTagText: {
-    color: COLORS.accent,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  remindIconBtn: {
-    backgroundColor: COLORS.warningBackground,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 3,
+    paddingVertical: 2,
     borderRadius: RADIUS.sm,
     borderWidth: 1,
-    borderColor: COLORS.warning,
+    borderColor: COLORS.border,
+  },
+  roomTagText: { color: COLORS.textSecondary, fontSize: 10, fontWeight: "700" },
+  remindIconBtn: {
+    backgroundColor: COLORS.surface,
+    padding: 4,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   statusBadge: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: SPACING.sm,
-    paddingVertical: 3,
+    paddingVertical: 2,
     borderRadius: RADIUS.full,
   },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: RADIUS.full,
-    marginRight: SPACING.xs,
-  },
-  paidBadge: { backgroundColor: COLORS.successBackground },
-  dueBadge: { backgroundColor: COLORS.warningBackground },
+  paidBadge: { backgroundColor: "rgba(16, 185, 129, 0.1)" },
+  dueBadge: { backgroundColor: "rgba(245, 158, 11, 0.1)" },
+  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 4 },
   paidDot: { backgroundColor: COLORS.success },
   dueDot: { backgroundColor: COLORS.warning },
-  statusText: { fontSize: 11, fontWeight: "600" },
+  statusText: { fontSize: 11, fontWeight: "700" },
   paidText: { color: COLORS.successText },
   dueText: { color: COLORS.warningText },
   cardBody: {
@@ -980,22 +1013,18 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-end",
   },
-  tenantName: {
-    color: COLORS.textPrimary,
-    fontSize: 15,
-    fontWeight: "600",
-  },
+  tenantName: { color: COLORS.textPrimary, fontSize: 16, fontWeight: "700" },
   historyLinkText: {
     color: COLORS.accent,
-    fontSize: 11,
-    marginTop: 4,
+    fontSize: 12,
     fontWeight: "600",
+    marginTop: 4,
   },
   amountText: {
     color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: "700",
-    marginBottom: SPACING.sm,
+    marginBottom: 4,
   },
   manageBtn: {
     backgroundColor: COLORS.surface,
@@ -1007,54 +1036,40 @@ const styles = StyleSheet.create({
   },
   manageBtnText: {
     color: COLORS.textSecondary,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "600",
   },
   emptyCard: {
     alignItems: "center",
-    paddingVertical: 40,
-  },
-  emptyIcon: {
-    fontSize: 28,
-    marginBottom: SPACING.sm,
+    justifyContent: "center",
+    paddingVertical: SPACING.xxl,
   },
   emptyTitle: {
     color: COLORS.textPrimary,
-    fontSize: 15,
-    fontWeight: "600",
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: SPACING.sm,
   },
   emptySub: {
     color: COLORS.textMuted,
     fontSize: 12,
     textAlign: "center",
-    marginTop: SPACING.xs,
-    paddingHorizontal: SPACING.xxl,
+    marginTop: 4,
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    backgroundColor: "rgba(0,0,0,0.6)",
     justifyContent: "center",
     alignItems: "center",
-    padding: SPACING.xl,
+    padding: SPACING.lg,
   },
   modalBox: {
-    width: "100%",
     backgroundColor: COLORS.cardBg,
+    width: "100%",
     borderRadius: RADIUS.xl,
-    padding: SPACING.xl,
+    padding: SPACING.lg,
     borderWidth: 1,
     borderColor: COLORS.border,
-  },
-  modalHeaderTitle: {
-    color: COLORS.textWhite,
-    fontSize: 17,
-    fontWeight: "700",
-  },
-  modalHeaderSub: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    marginTop: SPACING.xs,
-    marginBottom: SPACING.lg,
   },
   historyModalHeader: {
     flexDirection: "row",
@@ -1062,71 +1077,67 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     marginBottom: SPACING.md,
   },
-  closeIconBtn: {
-    backgroundColor: COLORS.surface,
-    width: 28,
-    height: 28,
-    borderRadius: RADIUS.full,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  modalHeaderTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    fontWeight: "700",
   },
+  modalHeaderSub: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  closeIconBtn: { padding: 4 },
   contactOptionRow: {
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: RADIUS.md,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    backgroundColor: COLORS.surface,
+    padding: SPACING.md,
+    borderRadius: RADIUS.lg,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   monthRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
     paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.md,
-    borderRadius: RADIUS.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  monthRowActive: {
-    backgroundColor: COLORS.accentBackground,
-  },
-  monthRowText: {
-    color: COLORS.textSecondary,
-    fontSize: 14,
-  },
-  monthRowTextActive: {
-    color: COLORS.textWhite,
-    fontWeight: "700",
-  },
+  monthRowActive: { backgroundColor: COLORS.surface },
+  monthRowText: { color: COLORS.textMuted, fontSize: 14, fontWeight: "600" },
+  monthRowTextActive: { color: COLORS.accent, fontWeight: "700" },
   historyRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingVertical: SPACING.sm + 2,
+    alignItems: "center",
+    paddingVertical: SPACING.sm,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
   actionSubmitBtn: {
     paddingVertical: SPACING.md,
-    borderRadius: RADIUS.md,
+    borderRadius: RADIUS.lg,
     alignItems: "center",
-    marginBottom: SPACING.sm,
+    marginTop: SPACING.md,
   },
   btnSuccess: { backgroundColor: COLORS.success },
   btnWarning: { backgroundColor: COLORS.warning },
   actionSubmitText: {
     color: COLORS.textWhite,
-    fontSize: 14,
     fontWeight: "700",
+    fontSize: 14,
   },
   actionCancelBtn: {
     paddingVertical: SPACING.md,
     alignItems: "center",
+    marginTop: SPACING.xs,
   },
   actionCancelText: {
     color: COLORS.textMuted,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
   },
 });

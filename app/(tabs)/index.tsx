@@ -132,7 +132,7 @@ export default function Dashboard() {
       title: "Collect Rent",
       icon: "wallet-outline" as const,
       color: "#10B981",
-      route: "/rent",
+      route: "/generate-rent",
     },
     {
       id: "4",

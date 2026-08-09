@@ -17,78 +17,73 @@ import {
   View,
 } from "react-native";
 
-// Aapka ngrok ya server ka base URL
-const BASE_URL = "https://7e37-43-241-144-62.ngrok-free.app/api";
+const BASE_URL = "https://4a31-43-241-144-62.ngrok-free.app/api";
 
 export default function LoginScreen() {
-  const [step, setStep] = useState<"PHONE" | "OTP">("PHONE");
+  const [step, setStep] = useState<"INPUT" | "OTP">("INPUT");
+  // Channel selection: WHATSAPP or EMAIL
+  const [otpChannel, setOtpChannel] = useState<"WHATSAPP" | "EMAIL">(
+    "WHATSAPP",
+  );
+
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
-  const [otpToken, setOtpToken] = useState(""); // Temporary token received from Send OTP
+  const [otpToken, setOtpToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   // -------------------------------------------------------------
-  // 1. STEP 1: Send OTP Handler
+  // 1. STEP 1: Send OTP Handler (Mobile Number input only)
   // -------------------------------------------------------------
   const handleSendOtp = async () => {
-    console.log("STEP 1: Sending OTP request");
     setError("");
-    const trimmedPhone = phone.trim();
 
+    const trimmedPhone = phone.trim();
     if (!trimmedPhone || trimmedPhone.length !== 10) {
       setError("Please enter a valid 10-digit mobile number.");
       return;
     }
 
+    const payload = {
+      phone: trimmedPhone,
+      channel: otpChannel === "WHATSAPP" ? "whatsapp" : "email",
+    };
+
     setLoading(true);
 
     try {
-      console.log("STEP 2: Calling API -> /Auth/send-otp-stateless");
+      console.log("Calling API -> /Auth/send-otp-stateless", payload);
 
       const response = await axios.post(
         `${BASE_URL}/Auth/send-otp-stateless`,
-        {
-          phone: trimmedPhone,
-        },
+        payload,
         {
           timeout: 30000,
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
         },
       );
-
-      console.log("STEP 3: OTP Sent Successfully");
-      console.log(response.data);
 
       const tokenFromServer = response.data?.otpToken;
 
       if (tokenFromServer) {
         setOtpToken(tokenFromServer);
-        setStep("OTP"); // Switch view to OTP input
+        setStep("OTP");
       } else {
         setError("Failed to receive OTP token from server.");
       }
     } catch (e: any) {
-      console.log("STEP 4: Error in Send OTP");
-      console.log("Message:", e.message);
-      console.log("Response Data:", e.response?.data);
-
+      console.log("Error in Send OTP:", e?.response?.data);
       const serverMessage = e?.response?.data?.message;
-      setError(
-        serverMessage || "Mobile number not registered or account is inactive.",
-      );
+      setError(serverMessage || "User not found or account is inactive.");
     } finally {
       setLoading(false);
     }
   };
 
   // -------------------------------------------------------------
-  // 2. STEP 2: Verify OTP & Login Handler
+  // 2. STEP 2: Verify OTP Handler
   // -------------------------------------------------------------
   const handleVerifyOtp = async () => {
-    console.log("STEP 1: Verifying OTP");
     setError("");
     const trimmedOtp = otp.trim();
 
@@ -100,28 +95,24 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
-      console.log("STEP 2: Calling API -> /Auth/verify-otp-stateless");
+      const payload = {
+        phone: phone.trim(),
+        otp: trimmedOtp,
+        otpToken: otpToken,
+      };
 
       const response = await axios.post(
         `${BASE_URL}/Auth/verify-otp-stateless`,
-        {
-          phone: phone.trim(),
-          otp: trimmedOtp,
-          otpToken: otpToken, // Sending back the temporary token received in step 1
-        },
+        payload,
         {
           timeout: 30000,
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
         },
       );
 
-      console.log("STEP 3: Login Successful");
       const loginToken = response.data?.token;
 
       if (loginToken) {
-        // Decode JWT token to extract role & user metadata
         const decoded: any = jwtDecode(loginToken);
 
         const userRole =
@@ -138,7 +129,6 @@ export default function LoginScreen() {
           response?.data?.user?.id ??
           "";
 
-        // Save session locally in AsyncStorage
         await Promise.all([
           AsyncStorage.setItem("token", loginToken),
           AsyncStorage.setItem("isLoggedIn", "true"),
@@ -146,9 +136,6 @@ export default function LoginScreen() {
           AsyncStorage.setItem("userId", String(userId)),
         ]);
 
-        console.log("STEP 4: Navigating based on Role:", userRole);
-
-        // Role-based navigation redirect
         if (userRole === "SuperAdmin") {
           router.replace("/(Superadmin)" as any);
         } else if (userRole === "Admin" || userRole === "Staff") {
@@ -160,10 +147,6 @@ export default function LoginScreen() {
         setError("Invalid response from server. Token missing.");
       }
     } catch (e: any) {
-      console.log("STEP 4: Error in Verify OTP");
-      console.log("Message:", e.message);
-      console.log("Response Data:", e.response?.data);
-
       if (e.response) {
         setError(e.response.data?.message || "Invalid OTP entered.");
       } else {
@@ -194,20 +177,72 @@ export default function LoginScreen() {
               <Ionicons name="shield-checkmark" size={36} color="#38BDF8" />
             </View>
             <Text style={styles.title}>PG Manager</Text>
-            <Text style={styles.subtitle}>
-              Secure Mobile & OTP Authentication
-            </Text>
+            <Text style={styles.subtitle}>Secure OTP Authentication</Text>
           </View>
 
           {/* Form Card */}
           <View style={styles.card}>
-            {step === "PHONE" ? (
+            {step === "INPUT" ? (
               <>
                 <Text style={styles.welcome}>Welcome Back 👋</Text>
                 <Text style={styles.cardSub}>
-                  Enter your registered mobile number
+                  Choose where to receive your OTP
                 </Text>
 
+                {/* WhatsApp vs Email OTP Switcher */}
+                <View style={styles.tabContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.tab,
+                      otpChannel === "WHATSAPP" && styles.activeTab,
+                    ]}
+                    onPress={() => {
+                      setOtpChannel("WHATSAPP");
+                      setError("");
+                    }}
+                  >
+                    <Ionicons
+                      name="logo-whatsapp"
+                      size={18}
+                      color={otpChannel === "WHATSAPP" ? "#2563EB" : "#64748B"}
+                    />
+                    <Text
+                      style={[
+                        styles.tabText,
+                        otpChannel === "WHATSAPP" && styles.activeTabText,
+                      ]}
+                    >
+                      WhatsApp OTP
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.tab,
+                      otpChannel === "EMAIL" && styles.activeTab,
+                    ]}
+                    onPress={() => {
+                      setOtpChannel("EMAIL");
+                      setError("");
+                    }}
+                  >
+                    <Ionicons
+                      name="mail-outline"
+                      size={18}
+                      color={otpChannel === "EMAIL" ? "#2563EB" : "#64748B"}
+                    />
+                    <Text
+                      style={[
+                        styles.tabText,
+                        otpChannel === "EMAIL" && styles.activeTabText,
+                      ]}
+                    >
+                      Email OTP
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Always Mobile Number Input */}
                 <Text style={styles.label}>Mobile Number</Text>
                 <View style={styles.inputContainer}>
                   <Text style={styles.countryCode}>+91</Text>
@@ -256,7 +291,7 @@ export default function LoginScreen() {
                 <View style={styles.otpHeaderRow}>
                   <TouchableOpacity
                     onPress={() => {
-                      setStep("PHONE");
+                      setStep("INPUT");
                       setOtp("");
                       setOtpToken("");
                       setError("");
@@ -267,7 +302,11 @@ export default function LoginScreen() {
                   <Text style={styles.welcome}>Verify OTP 🔐</Text>
                 </View>
                 <Text style={styles.cardSub}>
-                  Code sent to{" "}
+                  Code sent via{" "}
+                  <Text style={{ fontWeight: "700", color: "#0F172A" }}>
+                    {otpChannel === "WHATSAPP" ? "WhatsApp" : "Email"}
+                  </Text>{" "}
+                  to{" "}
                   <Text style={{ fontWeight: "700", color: "#0F172A" }}>
                     +91 {phone}
                   </Text>
@@ -338,17 +377,9 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0F172A",
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: "space-between",
-  },
+  container: { flex: 1, backgroundColor: "#0F172A" },
+  keyboardView: { flex: 1 },
+  scrollContent: { flexGrow: 1, justifyContent: "space-between" },
   header: {
     alignItems: "center",
     paddingTop: 50,
@@ -366,16 +397,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.15)",
     marginBottom: 12,
   },
-  title: {
-    color: "#FFFFFF",
-    fontSize: 28,
-    fontWeight: "800",
-  },
-  subtitle: {
-    color: "#94A3B8",
-    fontSize: 14,
-    marginTop: 4,
-  },
+  title: { color: "#FFFFFF", fontSize: 28, fontWeight: "800" },
+  subtitle: { color: "#94A3B8", fontSize: 14, marginTop: 4 },
   card: {
     flex: 1,
     backgroundColor: "#FFFFFF",
@@ -385,29 +408,35 @@ const styles = StyleSheet.create({
     paddingTop: 28,
     paddingBottom: 24,
   },
-  welcome: {
-    fontSize: 26,
-    fontWeight: "800",
-    color: "#0F172A",
-  },
-  cardSub: {
-    color: "#64748B",
-    fontSize: 14,
+  welcome: { fontSize: 26, fontWeight: "800", color: "#0F172A" },
+  cardSub: { color: "#64748B", fontSize: 14, marginBottom: 16, marginTop: 4 },
+  tabContainer: {
+    flexDirection: "row",
+    backgroundColor: "#F1F5F9",
+    borderRadius: 12,
+    padding: 4,
     marginBottom: 20,
-    marginTop: 4,
   },
-  otpHeaderRow: {
+  tab: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 6,
   },
-  label: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#334155",
-    marginBottom: 6,
-    marginTop: 6,
+  activeTab: {
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
   },
+  tabText: { fontSize: 13, fontWeight: "600", color: "#64748B" },
+  activeTabText: { color: "#2563EB", fontWeight: "700" },
+  otpHeaderRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  label: { fontSize: 13, fontWeight: "700", color: "#334155", marginBottom: 6 },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -428,11 +457,7 @@ const styles = StyleSheet.create({
     borderRightColor: "#CBD5E1",
     paddingRight: 8,
   },
-  input: {
-    flex: 1,
-    color: "#0F172A",
-    fontSize: 15,
-  },
+  input: { flex: 1, color: "#0F172A", fontSize: 15 },
   errorBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -460,26 +485,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 12,
   },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  loginText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  resendBox: {
-    marginTop: 16,
-    alignItems: "center",
-  },
-  resendText: {
-    color: "#64748B",
-    fontSize: 13,
-  },
-  resendBold: {
-    color: "#2563EB",
-    fontWeight: "700",
-  },
+  buttonDisabled: { opacity: 0.7 },
+  loginText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
+  resendBox: { marginTop: 16, alignItems: "center" },
+  resendText: { color: "#64748B", fontSize: 13 },
+  resendBold: { color: "#2563EB", fontWeight: "700" },
   footer: {
     textAlign: "center",
     marginTop: 30,
