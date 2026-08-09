@@ -17,7 +17,7 @@ import {
   View,
 } from "react-native";
 
-const BASE_URL = "https://4a31-43-241-144-62.ngrok-free.app/api";
+const BASE_URL = "https://pg-ecosystem-api.onrender.com/api";
 
 export default function LoginScreen() {
   const [step, setStep] = useState<"INPUT" | "OTP">("INPUT");
@@ -39,6 +39,7 @@ export default function LoginScreen() {
     setError("");
 
     const trimmedPhone = phone.trim();
+
     if (!trimmedPhone || trimmedPhone.length !== 10) {
       setError("Please enter a valid 10-digit mobile number.");
       return;
@@ -58,23 +59,49 @@ export default function LoginScreen() {
         `${BASE_URL}/Auth/send-otp-stateless`,
         payload,
         {
-          timeout: 30000,
-          headers: { "Content-Type": "application/json" },
+          timeout: 150000,
+          headers: {
+            "Content-Type": "application/json",
+          },
         },
       );
 
-      const tokenFromServer = response.data?.otpToken;
+      console.log("OTP API RESPONSE:", response.data);
 
-      if (tokenFromServer) {
+      const tokenFromServer = response.data?.otpToken;
+      const debugOtp = response.data?.debugOtp;
+
+      if (response.data?.success && tokenFromServer) {
+        // OTP token save karo
         setOtpToken(tokenFromServer);
+
+        // Backend se aaya OTP automatically fill karo
+        if (debugOtp) {
+          setOtp(String(debugOtp));
+        }
+
+        // OTP screen open karo
         setStep("OTP");
+
+        setError("");
       } else {
-        setError("Failed to receive OTP token from server.");
+        setError(
+          response.data?.message || "Failed to receive OTP token from server.",
+        );
       }
     } catch (e: any) {
-      console.log("Error in Send OTP:", e?.response?.data);
-      const serverMessage = e?.response?.data?.message;
-      setError(serverMessage || "User not found or account is inactive.");
+      console.log("========== API ERROR ==========");
+      console.log("Message:", e?.message);
+      console.log("Code:", e?.code);
+      console.log("Status:", e?.response?.status);
+      console.log("Response:", e?.response?.data);
+      console.log("Request:", e?.request);
+
+      setError(
+        e?.response?.data?.message ||
+          e?.message ||
+          "Network error. Please check your connection.",
+      );
     } finally {
       setLoading(false);
     }
@@ -140,7 +167,7 @@ export default function LoginScreen() {
           router.replace("/(Superadmin)" as any);
         } else if (userRole === "Admin" || userRole === "Staff") {
           router.replace("/(tabs)" as any);
-        } else if (userRole === "User") {
+        } else if (userRole === "Tenant") {
           router.replace("/(tenant)" as any);
         }
       } else {
