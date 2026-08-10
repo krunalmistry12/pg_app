@@ -1,6 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import axios from "axios";
 import { router } from "expo-router";
 import { jwtDecode } from "jwt-decode";
 import React, { useState } from "react";
@@ -17,8 +16,7 @@ import {
   View,
 } from "react-native";
 
-const BASE_URL = "https://pg-ecosystem-api.onrender.com/api";
-
+import api from "@/src/services/api";
 export default function LoginScreen() {
   const [step, setStep] = useState<"INPUT" | "OTP">("INPUT");
   // Channel selection: WHATSAPP or EMAIL
@@ -55,16 +53,12 @@ export default function LoginScreen() {
     try {
       console.log("Calling API -> /Auth/send-otp-stateless", payload);
 
-      const response = await axios.post(
-        `${BASE_URL}/Auth/send-otp-stateless`,
-        payload,
-        {
-          timeout: 150000,
-          headers: {
-            "Content-Type": "application/json",
-          },
+      const response = await api.post("/Auth/send-otp-stateless", payload, {
+        timeout: 150000,
+        headers: {
+          "Content-Type": "application/json",
         },
-      );
+      });
 
       console.log("OTP API RESPONSE:", response.data);
 
@@ -128,14 +122,10 @@ export default function LoginScreen() {
         otpToken: otpToken,
       };
 
-      const response = await axios.post(
-        `${BASE_URL}/Auth/verify-otp-stateless`,
-        payload,
-        {
-          timeout: 30000,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      const response = await api.post("/Auth/verify-otp-stateless", payload, {
+        timeout: 30000,
+        headers: { "Content-Type": "application/json" },
+      });
 
       const loginToken = response.data?.token;
 
@@ -162,7 +152,7 @@ export default function LoginScreen() {
           AsyncStorage.setItem("userRole", userRole),
           AsyncStorage.setItem("userId", String(userId)),
         ]);
-
+        console.log(userRole);
         if (userRole === "SuperAdmin") {
           router.replace("/(Superadmin)" as any);
         } else if (userRole === "Admin" || userRole === "Staff") {

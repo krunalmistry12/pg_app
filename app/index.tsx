@@ -65,8 +65,8 @@ export default function Index() {
               setTargetRoute("/(Superadmin)");
             } else if (userRole === "Admin" || userRole === "Manager") {
               setTargetRoute("/(tabs)"); // 👈 Admin / Manager goes to (tabs)
-            } else if (userRole === "User" || userRole === "Student") {
-              setTargetRoute("/(tenant)"); // 👈 Tenant goes to (tenant)
+            } else if (userRole === "User" || userRole === "Tenant") {
+              setTargetRoute("/(tenant)");
             } else {
               setTargetRoute("/(tabs)"); // Fallback Default Tabs
             }

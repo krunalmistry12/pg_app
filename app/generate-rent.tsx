@@ -183,7 +183,11 @@ export default function GenerateRentPage() {
         setPaymentRequests(
           Array.isArray(reqData) ? reqData : getDummyRequests(),
         );
-      } catch (err) {
+      } catch (err: any) {
+        console.log(
+          "Payment Request API Error:",
+          err?.response || err?.message,
+        );
         setPaymentRequests(getDummyRequests());
       }
     } catch (error) {
@@ -377,6 +381,22 @@ export default function GenerateRentPage() {
     }
   };
 
+  const generateMonthlyRent = async (
+    tenantId: number,
+    month: number,
+    year: number,
+  ) => {
+    return api.post("/Rent/generate-bill", {
+      tenantId,
+      month,
+      year,
+      endingMeterReading: 0,
+      ratePerUnit: 0,
+      extraCharges: 0,
+      discount: 0,
+    });
+  };
+
   const handleGenerateRent = async () => {
     if (selectedTenantIds.length === 0) {
       Alert.alert(
@@ -385,13 +405,39 @@ export default function GenerateRentPage() {
       );
       return;
     }
-    setSubmitting(true);
-    setTimeout(() => {
+
+    try {
+      setSubmitting(true);
+
+      const monthIndex = ALL_MONTHS.indexOf(selectedMonth) + 1;
+      const yearNum = Number(selectedYear);
+
+      // Sabhi selected tenants ke liye parallel API requests bhejna
+      const promises = selectedTenantIds.map((tenantId) =>
+        generateMonthlyRent(Number(tenantId), monthIndex, yearNum),
+      );
+
+      await Promise.all(promises);
+
       setGeneratedTenantIds([...generatedTenantIds, ...selectedTenantIds]);
       setSelectedTenantIds([]);
-      setSubmitting(false);
       Alert.alert("Success", "Tenant monthly rent dues added successfully!");
-    }, 1000);
+      fetchMonthData();
+    } catch (error: any) {
+      console.log(
+        "Generate Rent API Error:",
+        error?.response || error?.message,
+      );
+
+      const errorMessage =
+        error?.response?.data?.errors?.TenantId?.[0] ||
+        error?.response?.data?.title ||
+        "Failed to generate rent bills.";
+
+      Alert.alert("Error", errorMessage);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (initialLoading) {

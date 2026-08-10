@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // Base URL ko alag define kar sakte hain bar-bar likhne se bachne ke liye
-const BASE_URL = "https://pg-ecosystem-api.onrender.com/api";
+const BASE_URL = "https://f9ff-43-241-144-62.ngrok-free.app/api";
 
 // State variables (Aapke React component ke andar rahenge)
 // const [phone, setPhone] = useState("");
@@ -18,9 +18,9 @@ const handleSendOtp = async (phoneNumber: string) => {
     console.log("STEP 2: Calling API");
 
     const response = await axios.post(
-      `${BASE_URL}/Auth/send-otp-stateless`, // 👈 Aapke naye controller ka endpoint
+      `${BASE_URL}/Auth/send-otp-stateless`,
       {
-        phone: phoneNumber, // 10-digit mobile number
+        phone: phoneNumber,
       },
       {
         timeout: 30000,

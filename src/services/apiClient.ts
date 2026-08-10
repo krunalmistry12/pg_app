@@ -1,10 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 
-const BASE_URL = "https://pg-ecosystem-api.onrender.com/api";
 
+import api from "@/src/services/api";
 const apiClient = axios.create({
-  baseURL: BASE_URL,
+  baseURL: api.defaults.baseURL,
   timeout: 30000,
   headers: {
     "Content-Type": "application/json",
