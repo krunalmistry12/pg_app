@@ -52,7 +52,7 @@ export default function TenantLayout() {
 
       {/* 2. Rent & Bills Tab */}
       <Tabs.Screen
-        name="rent-payments"
+        name="TenantRentScreen" // Yahan file ka exact naam likhein
         options={{
           title: "Rent & Bills",
           tabBarIcon: ({ color, focused }) => (

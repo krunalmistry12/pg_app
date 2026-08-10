@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
-import TenantDashboard from "./TenantDashboard";
+import TenantDashboard from "../TenantDashboard";
 
 export default function HomeScreen() {
   const [role, setRole] = useState<string | null>(null);

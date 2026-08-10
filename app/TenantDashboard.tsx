@@ -4,17 +4,17 @@ import { router } from "expo-router";
 import { jwtDecode } from "jwt-decode";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    RefreshControl,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
-import api from "../../src/services/api";
+import api from "../src/services/api";
 
 interface TenantData {
   name: string;
