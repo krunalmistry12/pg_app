@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // Base URL ko alag define kar sakte hain bar-bar likhne se bachne ke liye
-const BASE_URL = "https://f9ff-43-241-144-62.ngrok-free.app/api";
+const BASE_URL = "https://pg-ecosystem-api.onrender.com/api";
 
 // State variables (Aapke React component ke andar rahenge)
 // const [phone, setPhone] = useState("");

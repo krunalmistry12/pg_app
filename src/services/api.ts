@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage"; // Ya Secu
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "https://f9ff-43-241-144-62.ngrok-free.app/api",
+  baseURL: "https://pg-ecosystem-api.onrender.com/api",
   timeout: 30000,
   headers: {
     "Content-Type": "application/json",
