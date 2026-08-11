@@ -1,115 +1,32 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
-import { jwtDecode } from "jwt-decode";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import api from "../src/services/api";
-
-interface TenantData {
-  name: string;
-  roomNumber?: string;
-  rentAmount?: number;
-  dueDate: string;
-  isRentPaid: boolean;
-  pgName?: string;
-}
+import { TenantProfile, tenantService } from "../src/services/tenantApi";
+import { styles } from "../src/styles/Tenant/TenantDashboard.styles";
 
 export default function TenantDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tenant, setTenant] = useState<TenantData | null>(null);
+  const [tenant, setTenant] = useState<TenantProfile | null>(null);
 
-  const getTenantId = async () => {
+  const loadProfile = async () => {
     try {
-      const storedId =
-        (await AsyncStorage.getItem("tenantId")) ||
-        (await AsyncStorage.getItem("userId")) ||
-        (await AsyncStorage.getItem("id"));
-      if (storedId) return storedId;
-
-      const token = await AsyncStorage.getItem("token");
-      if (token) {
-        const decoded: any = jwtDecode(token);
-        return (
-          decoded.id ||
-          decoded.tenantId ||
-          decoded.sub ||
-          decoded.UserId ||
-          "18"
-        );
+      const data = await tenantService.fetchTenantProfileData();
+      if (data) {
+        setTenant(data);
       }
-    } catch (e) {
-      console.log("Error getting tenant ID:", e);
-    }
-    return "18";
-  };
-
-  const fetchTenantProfile = async () => {
-    try {
-      const tenantId = await getTenantId();
-
-      // 1. Fetch Tenant Profile
-      const response = await api.get(`/Tenants/${tenantId}`);
-      const resData = response.data?.data || response.data;
-
-      let isPaid = resData?.isRentPaid || false;
-
-      // 2. Double check with pending bills API to ensure absolute accuracy
-      try {
-        const billsResponse = await api.get("/Rent/tenant/my-pending-bills");
-        const billsData = billsResponse.data?.data || billsResponse.data;
-
-        // Agar pending bills ki list khali hai ya array length 0 hai, matlab rent pay ho chuka hai!
-        if (Array.isArray(billsData) && billsData.length === 0) {
-          isPaid = true;
-        } else if (Array.isArray(billsData) && billsData.length > 0) {
-          // Check if all bills are paid or amount due is 0
-          const hasUnpaid = billsData.some(
-            (bill: any) =>
-              !bill.isPaid && (bill.dueAmount > 0 || bill.amount > 0),
-          );
-          isPaid = !hasUnpaid;
-        }
-      } catch (billErr) {
-        console.log(
-          "Could not fetch pending bills, falling back to profile status:",
-          billErr,
-        );
-      }
-
-      const currentMonthName = new Date().toLocaleString("default", {
-        month: "long",
-        year: "numeric",
-      });
-
-      if (resData) {
-        setTenant({
-          name: resData.name || "Tenant",
-          roomNumber: `Flat ${resData.flatNumber || "N/A"} - ${resData.roomName || ""} (${resData.bedName || ""})`,
-          rentAmount: resData.rent || 0,
-          dueDate: resData.dueDate
-            ? `${resData.dueDate}th of ${currentMonthName}`
-            : currentMonthName,
-          isRentPaid: isPaid,
-          pgName: resData.apartmentName || "PG Accommodation",
-        });
-      }
-    } catch (error: any) {
-      console.log(
-        "Error fetching tenant profile:",
-        error?.response || error?.message,
-      );
+    } catch (error) {
+      console.log("Failed to load tenant profile");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -117,12 +34,12 @@ export default function TenantDashboard() {
   };
 
   useEffect(() => {
-    fetchTenantProfile();
+    loadProfile();
   }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchTenantProfile();
+    loadProfile();
   };
 
   const handleLogout = async () => {
@@ -132,13 +49,7 @@ export default function TenantDashboard() {
         text: "Logout",
         style: "destructive",
         onPress: async () => {
-          await AsyncStorage.multiRemove([
-            "token",
-            "isLoggedIn",
-            "userRole",
-            "tenantId",
-            "userId",
-          ]);
+          await tenantService.clearSessionData();
           router.replace("/login");
         },
       },
@@ -200,7 +111,7 @@ export default function TenantDashboard() {
         >
           <View style={styles.cardHeader}>
             <View style={{ flex: 1, marginRight: 10 }}>
-              <Text style={styles.cardLabel}>Room / Bed Info</Text>
+              <Text style={styles.cardLabel}>ROOM / BED</Text>
               <Text style={styles.cardValue} numberOfLines={1}>
                 {tenant?.roomNumber || "N/A"}
               </Text>
@@ -234,17 +145,47 @@ export default function TenantDashboard() {
 
           <View style={styles.divider} />
 
-          <View style={styles.rentDetails}>
-            <View>
-              <Text style={styles.cardLabel}>Monthly Rent</Text>
-              <Text style={styles.rentAmount}>
-                ₹{tenant?.rentAmount?.toLocaleString() ?? 0}
-              </Text>
+          {/* Professional Financial Summary Layout */}
+          <View style={{ marginBottom: 16 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" }}>
+              <View>
+                <Text style={styles.cardLabel}>TOTAL RENT AMOUNT</Text>
+                <Text style={[styles.rentAmount, { fontSize: 26, marginTop: 2 }]}>
+                  ₹{tenant?.rentAmount?.toLocaleString() ?? 0}
+                </Text>
+              </View>
+              <View style={styles.alignRight}>
+                <Text style={styles.cardLabel}>BILLING CYCLE</Text>
+                <Text style={[styles.dueDate, { marginTop: 4 }]}>{tenant?.dueDate || "N/A"}</Text>
+              </View>
             </View>
-            <View style={styles.alignRight}>
-              <Text style={styles.cardLabel}>Billing Cycle</Text>
-              <Text style={styles.dueDate}>{tenant?.dueDate || "N/A"}</Text>
-            </View>
+
+            {/* Sub-breakdown for Paid & Pending if partial payment exists */}
+            {!tenant?.isRentPaid && (
+              <View style={{ 
+                flexDirection: "row", 
+                marginTop: 14, 
+                backgroundColor: "rgba(255, 255, 255, 0.04)", 
+                padding: 10, 
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: "rgba(255, 255, 255, 0.06)"
+              }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.cardLabel, { fontSize: 10 }]}>PAID SO FAR</Text>
+                  <Text style={{ color: "#34D399", fontWeight: "700", fontSize: 14, marginTop: 2 }}>
+                    ₹{tenant?.paidAmount?.toLocaleString() ?? 0}
+                  </Text>
+                </View>
+                <View style={{ width: 1, backgroundColor: "rgba(255, 255, 255, 0.1)", marginHorizontal: 10 }} />
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={[styles.cardLabel, { fontSize: 10 }]}>BALANCE DUE</Text>
+                  <Text style={{ color: "#F59E0B", fontWeight: "700", fontSize: 14, marginTop: 2 }}>
+                    ₹{tenant?.pendingAmount?.toLocaleString() ?? 0}
+                  </Text>
+                </View>
+              </View>
+            )}
           </View>
 
           {/* Conditional Pay Button */}
@@ -255,7 +196,7 @@ export default function TenantDashboard() {
               activeOpacity={0.85}
             >
               <Ionicons name="card-outline" size={18} color="#FFF" />
-              <Text style={styles.payButtonText}>Pay Rent Now</Text>
+              <Text style={styles.payButtonText}>Pay Remaining Rent</Text>
             </TouchableOpacity>
           ) : (
             <View style={styles.paidSuccessBox}>
@@ -370,185 +311,3 @@ export default function TenantDashboard() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0B0F19" },
-  loadingCenter: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#0B0F19",
-  },
-  loadingText: { color: "#94A3B8", marginTop: 10, fontSize: 13 },
-  header: {
-    backgroundColor: "#0F172A",
-    paddingTop: 50,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderBottomWidth: 1,
-    borderBottomColor: "#1E293B",
-  },
-  headerLeft: { flex: 1 },
-  welcomeText: { color: "#94A3B8", fontSize: 12, fontWeight: "500" },
-  tenantName: {
-    color: "#F8FAFC",
-    fontSize: 20,
-    fontWeight: "800",
-    marginTop: 2,
-  },
-  pgBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 4,
-    backgroundColor: "rgba(56, 189, 248, 0.1)",
-    alignSelf: "flex-start",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  pgNameText: { color: "#38BDF8", fontSize: 11, fontWeight: "600" },
-  logoutBtn: {
-    backgroundColor: "#1E293B",
-    padding: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  scrollContent: { padding: 16, paddingBottom: 30 },
-  summaryCard: {
-    backgroundColor: "#111827",
-    borderRadius: 20,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: "#1F2937",
-    marginBottom: 24,
-  },
-  summaryCardPaid: {
-    borderColor: "rgba(52, 211, 153, 0.3)",
-  },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  cardLabel: {
-    fontSize: 11,
-    color: "#94A3B8",
-    fontWeight: "600",
-    textTransform: "uppercase",
-  },
-  cardValue: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#F8FAFC",
-    marginTop: 3,
-  },
-  statusBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-  },
-  statusText: { fontSize: 11, fontWeight: "700" },
-  divider: { height: 1, backgroundColor: "#1F2937", marginVertical: 16 },
-  rentDetails: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  rentAmount: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#38BDF8",
-    marginTop: 2,
-  },
-  alignRight: { alignItems: "flex-end" },
-  dueDate: { fontSize: 12, fontWeight: "700", color: "#F8FAFC", marginTop: 3 },
-  payButton: {
-    backgroundColor: "#3B82F6",
-    borderRadius: 12,
-    height: 46,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 18,
-  },
-  payButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
-    marginLeft: 6,
-  },
-  paidSuccessBox: {
-    backgroundColor: "rgba(52, 211, 153, 0.1)",
-    borderRadius: 12,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: "rgba(52, 211, 153, 0.2)",
-  },
-  paidSuccessText: { color: "#34D399", fontSize: 12, fontWeight: "600" },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#F8FAFC",
-    marginBottom: 12,
-  },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  gridItem: {
-    backgroundColor: "#111827",
-    width: "48%",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "#1F2937",
-  },
-  iconBox: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  gridTitle: { fontSize: 14, fontWeight: "700", color: "#F8FAFC" },
-  gridSub: { fontSize: 11, color: "#94A3B8", marginTop: 2 },
-  noticeCard: {
-    backgroundColor: "rgba(59, 130, 246, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(59, 130, 246, 0.2)",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-  },
-  noticeTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#60A5FA",
-    marginBottom: 6,
-  },
-  noticeText: { fontSize: 12, color: "#93C5FD", lineHeight: 18 },
-  noticeDate: {
-    fontSize: 11,
-    color: "#64748B",
-    marginTop: 10,
-    textAlign: "right",
-    fontWeight: "600",
-  },
-});

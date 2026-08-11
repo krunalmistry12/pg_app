@@ -1,4 +1,3 @@
-import api from "@/src/services/api";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -12,32 +11,17 @@ import {
   RefreshControl,
   SafeAreaView,
   StatusBar,
-  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-
-interface BillItem {
-  id: number | string;
-  rentId?: number;
-  month: number;
-  year: number;
-  totalAmount?: number;
-  amount?: number;
-  status: string;
-}
-
-interface PaymentHistoryItem {
-  id: number | string;
-  amountPaid: number;
-  paymentMode: string;
-  transactionId: string;
-  paymentDate: string;
-  remarks: string;
-  status?: string; // Approved/Pending
-}
+import {
+  BillItem,
+  PaymentHistoryItem,
+  rentApi,
+} from "../../src/services/Tenant/rentApi";
+import { styles } from "../../src/styles/Tenant/TenantRentScreen.styles";
 
 const ALL_MONTHS = [
   "",
@@ -84,26 +68,19 @@ export default function TenantRentScreen() {
       if (!isRefresh) setLoading(true);
 
       const [pendingRes, historyRes] = await Promise.allSettled([
-        api.get("/Rent/tenant/my-pending-bills"),
-        api.get("/Rent/tenant/my-payment-history"),
+        rentApi.getPendingBills(),
+        rentApi.getPaymentHistory(),
       ]);
 
       if (pendingRes.status === "fulfilled") {
-        const data =
-          pendingRes.value?.data?.data || pendingRes.value?.data || [];
-        setPendingBills(Array.isArray(data) ? data : []);
+        setPendingBills(pendingRes.value);
       }
 
       if (historyRes.status === "fulfilled") {
-        const data =
-          historyRes.value?.data?.data || historyRes.value?.data || [];
-        setPaymentHistory(Array.isArray(data) ? data : []);
+        setPaymentHistory(historyRes.value);
       }
     } catch (error: any) {
-      console.log(
-        "Fetch Tenant Rent Error:",
-        error?.response || error?.message,
-      );
+      console.log("Fetch Tenant Rent Error:", error?.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -117,7 +94,9 @@ export default function TenantRentScreen() {
 
   const handleOpenPaymentModal = (bill: BillItem) => {
     setSelectedBill(bill);
-    setAmountPaid(String(bill.totalAmount || bill.amount || ""));
+    // Ensure bill amount is correctly mapped as string
+    const billAmount = bill.totalAmount ?? bill.amount ?? 0;
+    setAmountPaid(String(billAmount));
     setPaymentMode("UPI");
     setTransactionId("");
     setRemarks("Monthly Rent Payment");
@@ -133,17 +112,35 @@ export default function TenantRentScreen() {
       return;
     }
 
+    const parsedAmount = Number(amountPaid);
+    const billMaxAmount = selectedBill.totalAmount ?? selectedBill.amount ?? 0;
+
+    // Validation: Check for invalid number or zero
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert("Invalid Amount", "Please enter a valid payment amount.");
+      return;
+    }
+
+    // Validation: Check if paid amount is greater than bill amount
+    if (parsedAmount > billMaxAmount) {
+      Alert.alert(
+        "Amount Exceeded",
+        `You cannot pay more than the bill amount (₹${billMaxAmount.toLocaleString()}).`,
+      );
+      return;
+    }
+
     try {
       setSubmitting(true);
       const payload = {
         rentId: Number(selectedBill.id || selectedBill.rentId),
-        amountPaid: Number(amountPaid),
+        amountPaid: parsedAmount,
         paymentMode: paymentMode,
         transactionId: transactionId.trim(),
         remarks: remarks.trim(),
       };
 
-      await api.post("/Rent/record-payment", payload);
+      await rentApi.recordPayment(payload);
 
       Alert.alert(
         "Success 🎉",
@@ -163,10 +160,11 @@ export default function TenantRentScreen() {
     }
   };
 
-  const totalPendingAmount = pendingBills.reduce(
-    (sum, bill) => sum + (bill.totalAmount || bill.amount || 0),
-    0,
-  );
+  // Safe Total Due calculation handling both totalAmount and amount fields properly
+  const totalPendingAmount = pendingBills.reduce((sum, bill) => {
+    const billVal = Number(bill.totalAmount ?? bill.amount ?? 0);
+    return sum + (isNaN(billVal) ? 0 : billVal);
+  }, 0);
 
   if (loading) {
     return (
@@ -270,48 +268,51 @@ export default function TenantRentScreen() {
               tintColor="#38BDF8"
             />
           }
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <View style={styles.cardHeaderRow}>
-                <View style={styles.row}>
-                  <View style={styles.iconBox}>
-                    <Ionicons
-                      name="receipt-outline"
-                      size={20}
-                      color="#F59E0B"
-                    />
-                  </View>
-                  <View>
-                    <Text style={styles.cardTitle}>
-                      {ALL_MONTHS[item.month] || "Month"} {item.year} Rent
-                    </Text>
-                    <View style={styles.statusBadgePending}>
-                      <Text style={styles.statusBadgePendingText}>
-                        {item.status || "PENDING"}
+          renderItem={({ item }) => {
+            const billAmount = item.totalAmount ?? item.amount ?? 0;
+            return (
+              <View style={styles.card}>
+                <View style={styles.cardHeaderRow}>
+                  <View style={styles.row}>
+                    <View style={styles.iconBox}>
+                      <Ionicons
+                        name="receipt-outline"
+                        size={20}
+                        color="#F59E0B"
+                      />
+                    </View>
+                    <View>
+                      <Text style={styles.cardTitle}>
+                        {ALL_MONTHS[item.month] || "Month"} {item.year} Rent
                       </Text>
+                      <View style={styles.statusBadgePending}>
+                        <Text style={styles.statusBadgePendingText}>
+                          {item.status || "PENDING"}
+                        </Text>
+                      </View>
                     </View>
                   </View>
+                  <Text style={styles.amountText}>
+                    ₹{billAmount.toLocaleString()}
+                  </Text>
                 </View>
-                <Text style={styles.amountText}>
-                  ₹{(item.totalAmount || item.amount || 0).toLocaleString()}
-                </Text>
-              </View>
 
-              <TouchableOpacity
-                style={styles.payButton}
-                onPress={() => handleOpenPaymentModal(item)}
-                activeOpacity={0.85}
-              >
-                <Ionicons
-                  name="card"
-                  size={16}
-                  color="#FFFFFF"
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.payButtonText}>Pay & Submit Details</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+                <TouchableOpacity
+                  style={styles.payButton}
+                  onPress={() => handleOpenPaymentModal(item)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name="card"
+                    size={16}
+                    color="#FFFFFF"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.payButtonText}>Pay & Submit Details</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          }}
           ListEmptyComponent={
             <View style={styles.emptyBox}>
               <View style={styles.emptyIconBg}>
@@ -475,224 +476,3 @@ export default function TenantRentScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#0B0F19" },
-  center: { justifyContent: "center", alignItems: "center" },
-  loadingText: {
-    color: "#94A3B8",
-    marginTop: 12,
-    fontSize: 13,
-    fontWeight: "500",
-  },
-
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#1E293B",
-  },
-  backBtn: {
-    marginRight: 14,
-    padding: 8,
-    backgroundColor: "#1E293B",
-    borderRadius: 10,
-  },
-  headerTitleContainer: { flex: 1 },
-  headerTitle: { color: "#F8FAFC", fontSize: 18, fontWeight: "700" },
-  headerSubtitle: { color: "#94A3B8", fontSize: 12, fontWeight: "500" },
-
-  overviewCard: {
-    backgroundColor: "#111827",
-    margin: 16,
-    marginBottom: 8,
-    padding: 18,
-    borderRadius: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#1F2937",
-  },
-  overviewLabel: { color: "#94A3B8", fontSize: 12, fontWeight: "600" },
-  overviewAmount: {
-    color: "#F8FAFC",
-    fontSize: 24,
-    fontWeight: "800",
-    marginTop: 2,
-  },
-  overviewBadge: {
-    backgroundColor: "rgba(56, 189, 248, 0.1)",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  overviewBadgeText: { color: "#38BDF8", fontSize: 11, fontWeight: "700" },
-
-  tabContainer: {
-    flexDirection: "row",
-    backgroundColor: "#111827",
-    padding: 4,
-    marginHorizontal: 16,
-    marginVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#1F2937",
-  },
-  tabButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 10,
-    borderRadius: 9,
-    gap: 6,
-  },
-  tabActive: {
-    backgroundColor: "#1F2937",
-  },
-  tabText: { color: "#64748B", fontSize: 12, fontWeight: "600" },
-  tabTextActive: { color: "#F8FAFC", fontWeight: "700" },
-
-  listContainer: { paddingHorizontal: 16, paddingBottom: 30, paddingTop: 4 },
-  card: {
-    backgroundColor: "#111827",
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#1F2937",
-  },
-  cardHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  row: { flexDirection: "row", alignItems: "center", flex: 1 },
-  iconBox: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: "rgba(245, 158, 11, 0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  cardTitle: { color: "#F8FAFC", fontSize: 15, fontWeight: "700" },
-  cardSub: { color: "#94A3B8", fontSize: 12, marginTop: 2 },
-  statusBadgePending: {
-    backgroundColor: "rgba(245, 158, 11, 0.15)",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    alignSelf: "flex-start",
-    marginTop: 4,
-  },
-  statusBadgePendingText: { color: "#F59E0B", fontSize: 10, fontWeight: "700" },
-  amountText: { color: "#F8FAFC", fontSize: 17, fontWeight: "800" },
-
-  payButton: {
-    backgroundColor: "#3B82F6",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginTop: 14,
-  },
-  payButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
-
-  historyDetailsFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#1F2937",
-    paddingTop: 10,
-  },
-  remarksText: { color: "#94A3B8", fontSize: 11, flex: 1, marginRight: 10 },
-  dateText: { color: "#64748B", fontSize: 11, fontWeight: "600" },
-
-  emptyBox: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 60,
-  },
-  emptyIconBg: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "#111827",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#1F2937",
-  },
-  emptyTitle: { color: "#F8FAFC", fontSize: 16, fontWeight: "700" },
-  emptyText: {
-    color: "#94A3B8",
-    fontSize: 12,
-    marginTop: 4,
-    textAlign: "center",
-  },
-
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0, 0, 0, 0.75)",
-  },
-  modalContent: {
-    backgroundColor: "#0F172A",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 22,
-    borderWidth: 1,
-    borderColor: "#1E293B",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 16,
-  },
-  modalTitle: { color: "#F8FAFC", fontSize: 18, fontWeight: "700" },
-  modalSubTitle: { color: "#94A3B8", fontSize: 12, marginTop: 2 },
-  closeBtn: {
-    backgroundColor: "#1E293B",
-    padding: 6,
-    borderRadius: 8,
-  },
-  inputLabel: {
-    color: "#94A3B8",
-    fontSize: 12,
-    fontWeight: "600",
-    marginBottom: 6,
-    marginTop: 10,
-  },
-  input: {
-    backgroundColor: "#1E293B",
-    borderWidth: 1,
-    borderColor: "#334155",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: "#F8FAFC",
-    fontSize: 14,
-  },
-  submitButton: {
-    backgroundColor: "#10B981",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 24,
-    marginBottom: 10,
-  },
-  submitButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-});
