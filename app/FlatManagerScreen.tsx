@@ -9,6 +9,7 @@ import {
   Modal,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -42,6 +43,12 @@ export default function FlatManagerScreen() {
   const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
+  // States for Custom Tenant Input Modal (Android & iOS safe)
+  const [tenantModalVisible, setTenantModalVisible] = useState(false);
+  const [selectedBedForCheckIn, setSelectedBedForCheckIn] =
+    useState<Bed | null>(null);
+  const [tenantNameInput, setTenantNameInput] = useState("");
+
   // Load flats from AsyncStorage
   const loadFlats = async () => {
     try {
@@ -49,7 +56,6 @@ export default function FlatManagerScreen() {
       if (data) {
         setFlats(JSON.parse(data));
       } else {
-        // Default starter flat if local storage is empty
         const defaultFlat: Flat = {
           id: "flat-101",
           flatNumber: "101",
@@ -115,7 +121,6 @@ export default function FlatManagerScreen() {
     if (!selectedZone || !selectedFlatId) return;
 
     if (bed.isOccupied) {
-      // Confirm vacating bed
       Alert.alert(
         "Vacate Bed",
         `Are you sure you want to remove ${
@@ -131,28 +136,21 @@ export default function FlatManagerScreen() {
         ],
       );
     } else {
-      // Prompt for tenant check-in
-      if (Alert.prompt) {
-        Alert.prompt(
-          "Check-In Tenant",
-          `Enter tenant name for ${bed.bedNumber}:`,
-          [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Assign Bed",
-              onPress: (name?: string) => {
-                const tenantName =
-                  name && name.trim() !== "" ? name.trim() : "Tenant";
-                updateBedStatus(bed.id, true, tenantName);
-              },
-            },
-          ],
-          "plain-text",
-        );
-      } else {
-        updateBedStatus(bed.id, true, "Occupied Bed");
-      }
+      // Open custom tenant modal instead of Alert.prompt (Supports Android & iOS)
+      setSelectedBedForCheckIn(bed);
+      setTenantNameInput("");
+      setTenantModalVisible(true);
     }
+  };
+
+  const handleAssignTenantSubmit = () => {
+    if (!selectedBedForCheckIn) return;
+    const finalName =
+      tenantNameInput.trim() !== "" ? tenantNameInput.trim() : "Tenant";
+    updateBedStatus(selectedBedForCheckIn.id, true, finalName);
+    setTenantModalVisible(false);
+    setSelectedBedForCheckIn(null);
+    setTenantNameInput("");
   };
 
   // Persist updated bed state back to AsyncStorage
@@ -188,7 +186,6 @@ export default function FlatManagerScreen() {
     }
   };
 
-  // Handler to delete a flat
   const handleDeleteFlat = (flatId: string, flatNumber: string) => {
     Alert.alert(
       "Delete Flat",
@@ -220,7 +217,6 @@ export default function FlatManagerScreen() {
 
     return (
       <View style={styles.flatCard}>
-        {/* Flat Card Header */}
         <View style={styles.flatHeader}>
           <View>
             <Text style={styles.flatTitle}>Flat {item.flatNumber}</Text>
@@ -245,7 +241,6 @@ export default function FlatManagerScreen() {
           </View>
         </View>
 
-        {/* Dynamically List All Saved Zones */}
         <View style={styles.zonesContainer}>
           {item.zones.map((zone) => {
             const occupiedBeds = zone.beds.filter((b) => b.isOccupied).length;
@@ -301,7 +296,6 @@ export default function FlatManagerScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Top Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Flat Management</Text>
         <Text style={styles.subtitle}>
@@ -309,7 +303,6 @@ export default function FlatManagerScreen() {
         </Text>
       </View>
 
-      {/* List of Flats */}
       <FlatList
         data={flats}
         keyExtractor={(item) => item.id}
@@ -317,7 +310,6 @@ export default function FlatManagerScreen() {
         contentContainerStyle={{ paddingBottom: 100 }}
       />
 
-      {/* Floating Action Button (FAB) to Add Flat */}
       <TouchableOpacity
         style={styles.fab}
         onPress={() => router.push("/add-2bhk-flat")}
@@ -326,7 +318,7 @@ export default function FlatManagerScreen() {
         <Ionicons name="add" size={30} color="#FFFFFF" />
       </TouchableOpacity>
 
-      {/* Interactive Bed Matrix Modal */}
+      {/* Bed Matrix Modal */}
       <Modal
         visible={modalVisible}
         transparent
@@ -384,6 +376,48 @@ export default function FlatManagerScreen() {
                   </Text>
                 </TouchableOpacity>
               ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom Check-In Tenant Modal (Android & iOS Safe) */}
+      <Modal
+        visible={tenantModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTenantModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.tenantModalContent}>
+            <Text style={styles.tenantModalTitle}>Check-In Tenant</Text>
+            <Text style={styles.tenantModalSub}>
+              Enter tenant name for {selectedBedForCheckIn?.bedNumber}:
+            </Text>
+
+            <TextInput
+              style={styles.tenantInput}
+              placeholder="e.g. Rahul Sharma"
+              placeholderTextColor="#64748B"
+              value={tenantNameInput}
+              onChangeText={setTenantNameInput}
+              autoFocus={true}
+            />
+
+            <View style={styles.tenantModalActions}>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.cancelBtn]}
+                onPress={() => setTenantModalVisible(false)}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.assignBtn]}
+                onPress={handleAssignTenantSubmit}
+              >
+                <Text style={styles.assignBtnText}>Assign Bed</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -575,5 +609,61 @@ const styles = StyleSheet.create({
   bedStatusText: {
     fontSize: 11,
     marginTop: 2,
+  },
+  tenantModalContent: {
+    backgroundColor: "#1E293B",
+    marginHorizontal: 24,
+    marginBottom: "auto",
+    marginTop: "auto",
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+  tenantModalTitle: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  tenantModalSub: {
+    color: "#94A3B8",
+    fontSize: 13,
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  tenantInput: {
+    backgroundColor: "#0F172A",
+    borderWidth: 1,
+    borderColor: "#334155",
+    borderRadius: 10,
+    color: "#FFFFFF",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    marginBottom: 20,
+  },
+  tenantModalActions: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  actionBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  cancelBtn: {
+    backgroundColor: "#334155",
+  },
+  cancelBtnText: {
+    color: "#CBD5E1",
+    fontWeight: "600",
+  },
+  assignBtn: {
+    backgroundColor: "#2563EB",
+  },
+  assignBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
   },
 });

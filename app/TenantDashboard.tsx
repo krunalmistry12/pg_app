@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -14,32 +15,53 @@ import {
 import { TenantProfile, tenantService } from "../src/services/tenantApi";
 import { styles } from "../src/styles/Tenant/TenantDashboard.styles";
 
+const CACHE_KEY = "cached_tenant_profile";
+
 export default function TenantDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tenant, setTenant] = useState<TenantProfile | null>(null);
 
-  const loadProfile = async () => {
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+  // Pehle cached data dikhao fast rendering ke liye, phir background mein API call karo
+  const loadInitialData = async () => {
     try {
+      const cachedData = await AsyncStorage.getItem(CACHE_KEY);
+      if (cachedData) {
+        setTenant(JSON.parse(cachedData));
+        setLoading(false); // Quick load from cache
+      }
+    } catch (e) {
+      console.log("Error reading cached profile", e);
+    }
+
+    // Fresh data fetch from API
+    await loadProfile(false);
+  };
+
+  const loadProfile = async (isRefreshing = false) => {
+    try {
+      if (isRefreshing) setRefreshing(true);
+
       const data = await tenantService.fetchTenantProfileData();
       if (data) {
         setTenant(data);
+        // Cache mein save kar lo taaki rent screen ya next time use ho sake
+        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data));
       }
     } catch (error) {
-      console.log("Failed to load tenant profile");
+      console.log("Failed to load tenant profile from API");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  useEffect(() => {
-    loadProfile();
-  }, []);
-
   const onRefresh = () => {
-    setRefreshing(true);
-    loadProfile();
+    loadProfile(true);
   };
 
   const handleLogout = async () => {
@@ -49,6 +71,8 @@ export default function TenantDashboard() {
         text: "Logout",
         style: "destructive",
         onPress: async () => {
+          // Logout par cache aur session data clear kar do
+          await AsyncStorage.removeItem(CACHE_KEY);
           await tenantService.clearSessionData();
           router.replace("/login");
         },
@@ -56,7 +80,7 @@ export default function TenantDashboard() {
     ]);
   };
 
-  if (loading) {
+  if (loading && !tenant) {
     return (
       <View style={styles.loadingCenter}>
         <ActivityIndicator size="large" color="#38BDF8" />
@@ -73,7 +97,7 @@ export default function TenantDashboard() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={styles.welcomeText}>Welcome back 👋</Text>
-          <Text style={styles.tenantName}>{tenant?.name}</Text>
+          <Text style={styles.tenantName}>{tenant?.name || "Tenant"}</Text>
           {tenant?.pgName ? (
             <View style={styles.pgBadge}>
               <Ionicons name="business-outline" size={12} color="#38BDF8" />
@@ -147,40 +171,76 @@ export default function TenantDashboard() {
 
           {/* Professional Financial Summary Layout */}
           <View style={{ marginBottom: 16 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" }}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "flex-end",
+              }}
+            >
               <View>
                 <Text style={styles.cardLabel}>TOTAL RENT AMOUNT</Text>
-                <Text style={[styles.rentAmount, { fontSize: 26, marginTop: 2 }]}>
+                <Text
+                  style={[styles.rentAmount, { fontSize: 26, marginTop: 2 }]}
+                >
                   ₹{tenant?.rentAmount?.toLocaleString() ?? 0}
                 </Text>
               </View>
               <View style={styles.alignRight}>
                 <Text style={styles.cardLabel}>BILLING CYCLE</Text>
-                <Text style={[styles.dueDate, { marginTop: 4 }]}>{tenant?.dueDate || "N/A"}</Text>
+                <Text style={[styles.dueDate, { marginTop: 4 }]}>
+                  {tenant?.dueDate || "N/A"}
+                </Text>
               </View>
             </View>
 
             {/* Sub-breakdown for Paid & Pending if partial payment exists */}
             {!tenant?.isRentPaid && (
-              <View style={{ 
-                flexDirection: "row", 
-                marginTop: 14, 
-                backgroundColor: "rgba(255, 255, 255, 0.04)", 
-                padding: 10, 
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor: "rgba(255, 255, 255, 0.06)"
-              }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  marginTop: 14,
+                  backgroundColor: "rgba(255, 255, 255, 0.04)",
+                  padding: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: "rgba(255, 255, 255, 0.06)",
+                }}
+              >
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.cardLabel, { fontSize: 10 }]}>PAID SO FAR</Text>
-                  <Text style={{ color: "#34D399", fontWeight: "700", fontSize: 14, marginTop: 2 }}>
+                  <Text style={[styles.cardLabel, { fontSize: 10 }]}>
+                    PAID SO FAR
+                  </Text>
+                  <Text
+                    style={{
+                      color: "#34D399",
+                      fontWeight: "700",
+                      fontSize: 14,
+                      marginTop: 2,
+                    }}
+                  >
                     ₹{tenant?.paidAmount?.toLocaleString() ?? 0}
                   </Text>
                 </View>
-                <View style={{ width: 1, backgroundColor: "rgba(255, 255, 255, 0.1)", marginHorizontal: 10 }} />
+                <View
+                  style={{
+                    width: 1,
+                    backgroundColor: "rgba(255, 255, 255, 0.1)",
+                    marginHorizontal: 10,
+                  }}
+                />
                 <View style={{ flex: 1, alignItems: "flex-end" }}>
-                  <Text style={[styles.cardLabel, { fontSize: 10 }]}>BALANCE DUE</Text>
-                  <Text style={{ color: "#F59E0B", fontWeight: "700", fontSize: 14, marginTop: 2 }}>
+                  <Text style={[styles.cardLabel, { fontSize: 10 }]}>
+                    BALANCE DUE
+                  </Text>
+                  <Text
+                    style={{
+                      color: "#F59E0B",
+                      fontWeight: "700",
+                      fontSize: 14,
+                      marginTop: 2,
+                    }}
+                  >
                     ₹{tenant?.pendingAmount?.toLocaleString() ?? 0}
                   </Text>
                 </View>
@@ -255,7 +315,7 @@ export default function TenantDashboard() {
 
           <TouchableOpacity
             style={styles.gridItem}
-            onPress={() => router.push("/(tenant)/rent-payments" as any)}
+            onPress={() => router.push("/(tenant)/TenantRentScreen" as any)}
             activeOpacity={0.8}
           >
             <View

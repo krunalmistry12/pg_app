@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -9,13 +10,14 @@ import {
   Modal,
   Platform,
   RefreshControl,
-  SafeAreaView,
   StatusBar,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { pdfReceiptService } from "../../src/services/pdfReceiptService";
 import {
   BillItem,
   PaymentHistoryItem,
@@ -39,6 +41,21 @@ const ALL_MONTHS = [
   "December",
 ];
 
+const extractPendingAmount = (item: any): number => {
+  if (!item) return 0;
+  const raw = item.pendingAmount ?? item.totalAmount ?? item.amount ?? 0;
+  const parsed = Number(raw);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+const getPaymentModeLabel = (mode: any): string => {
+  if (mode === 1 || mode === "1" || mode === "UPI") return "UPI";
+  if (mode === 2 || mode === "2" || mode === "Cash") return "Cash";
+  if (mode === 3 || mode === "3" || mode === "Bank Transfer")
+    return "Bank Transfer";
+  return "Online Payment";
+};
+
 export default function TenantRentScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState<boolean>(true);
@@ -50,7 +67,8 @@ export default function TenantRentScreen() {
     [],
   );
 
-  // Payment Modal States
+  const [cachedTenantInfo, setCachedTenantInfo] = useState<any>(null);
+
   const [isModalVisible, setIsModalVisible] = useState<boolean>(false);
   const [selectedBill, setSelectedBill] = useState<BillItem | null>(null);
   const [amountPaid, setAmountPaid] = useState<string>("");
@@ -59,9 +77,41 @@ export default function TenantRentScreen() {
   const [remarks, setRemarks] = useState<string>("Monthly Rent Payment");
   const [submitting, setSubmitting] = useState<boolean>(false);
 
+  const [isReceiptModalVisible, setIsReceiptModalVisible] =
+    useState<boolean>(false);
+  const [selectedReceipt, setSelectedReceipt] =
+    useState<PaymentHistoryItem | null>(null);
+
   useEffect(() => {
     fetchTenantData();
+    loadCachedTenantData();
   }, []);
+
+  const loadCachedTenantData = async () => {
+    try {
+      const keys = [
+        "cached_tenant_profile",
+        "tenant_info",
+        "user_profile",
+        "cached_tenants_list",
+        "auth_user",
+        "userData",
+      ];
+      for (const key of keys) {
+        const stored = await AsyncStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          const dataObj = Array.isArray(parsed) ? parsed[0] : parsed;
+          if (dataObj) {
+            setCachedTenantInfo(dataObj);
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      console.log("Error loading cached tenant data:", e);
+    }
+  };
 
   const fetchTenantData = async (isRefresh = false) => {
     try {
@@ -90,17 +140,22 @@ export default function TenantRentScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     fetchTenantData(true);
+    loadCachedTenantData();
   };
 
   const handleOpenPaymentModal = (bill: BillItem) => {
     setSelectedBill(bill);
-    // Ensure bill amount is correctly mapped as string
-    const billAmount = bill.totalAmount ?? bill.amount ?? 0;
+    const billAmount = extractPendingAmount(bill);
     setAmountPaid(String(billAmount));
     setPaymentMode("UPI");
     setTransactionId("");
     setRemarks("Monthly Rent Payment");
     setIsModalVisible(true);
+  };
+
+  const handleOpenReceiptModal = (receipt: PaymentHistoryItem) => {
+    setSelectedReceipt(receipt);
+    setIsReceiptModalVisible(true);
   };
 
   const handleSubmitPayment = async () => {
@@ -113,29 +168,32 @@ export default function TenantRentScreen() {
     }
 
     const parsedAmount = Number(amountPaid);
-    const billMaxAmount = selectedBill.totalAmount ?? selectedBill.amount ?? 0;
+    const billMaxAmount = extractPendingAmount(selectedBill);
 
-    // Validation: Check for invalid number or zero
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       Alert.alert("Invalid Amount", "Please enter a valid payment amount.");
       return;
     }
 
-    // Validation: Check if paid amount is greater than bill amount
     if (parsedAmount > billMaxAmount) {
       Alert.alert(
         "Amount Exceeded",
-        `You cannot pay more than the bill amount (₹${billMaxAmount.toLocaleString()}).`,
+        `You cannot pay more than the pending amount (₹${billMaxAmount.toLocaleString()}).`,
       );
       return;
     }
+
+    let modeValue: any = paymentMode;
+    if (paymentMode === "UPI") modeValue = 1;
+    else if (paymentMode === "Cash") modeValue = 2;
+    else if (paymentMode === "Bank Transfer") modeValue = 3;
 
     try {
       setSubmitting(true);
       const payload = {
         rentId: Number(selectedBill.id || selectedBill.rentId),
         amountPaid: parsedAmount,
-        paymentMode: paymentMode,
+        paymentMode: modeValue.toString(),
         transactionId: transactionId.trim(),
         remarks: remarks.trim(),
       };
@@ -160,10 +218,43 @@ export default function TenantRentScreen() {
     }
   };
 
-  // Safe Total Due calculation handling both totalAmount and amount fields properly
+  const getTenantName = () => {
+    const receipt: any = selectedReceipt;
+    return (
+      receipt?.tenant?.name ||
+      receipt?.tenantName ||
+      cachedTenantInfo?.name ||
+      cachedTenantInfo?.fullName ||
+      cachedTenantInfo?.tenantName ||
+      "Tenant"
+    );
+  };
+
+  const getApartmentName = () => {
+    const receipt: any = selectedReceipt;
+    return (
+      receipt?.rent?.flat?.apartmentName ||
+      receipt?.apartmentName ||
+      cachedTenantInfo?.apartmentName ||
+      cachedTenantInfo?.pgName ||
+      cachedTenantInfo?.propertyName ||
+      "PG / Apartment"
+    );
+  };
+
+  const getRoomNumber = () => {
+    const receipt: any = selectedReceipt;
+    return (
+      receipt?.rent?.room?.roomNumber ||
+      receipt?.roomNumber ||
+      cachedTenantInfo?.roomNumber ||
+      cachedTenantInfo?.room ||
+      "N/A"
+    );
+  };
+
   const totalPendingAmount = pendingBills.reduce((sum, bill) => {
-    const billVal = Number(bill.totalAmount ?? bill.amount ?? 0);
-    return sum + (isNaN(billVal) ? 0 : billVal);
+    return sum + extractPendingAmount(bill);
   }, 0);
 
   if (loading) {
@@ -186,7 +277,10 @@ export default function TenantRentScreen() {
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
           <Text style={styles.headerTitle}>Rent & Bills</Text>
-          <Text style={styles.headerSubtitle}>Manage payments & receipts</Text>
+          <Text style={styles.headerSubtitle}>
+            {cachedTenantInfo?.pgName ? `${cachedTenantInfo.pgName} • ` : ""}
+            Manage payments & receipts
+          </Text>
         </View>
       </View>
 
@@ -259,7 +353,9 @@ export default function TenantRentScreen() {
       {activeTab === "PENDING" ? (
         <FlatList
           data={pendingBills}
-          keyExtractor={(item, index) => String(item.id || index)}
+          keyExtractor={(item, index) =>
+            String(item.id || item.rentId || index)
+          }
           contentContainerStyle={styles.listContainer}
           refreshControl={
             <RefreshControl
@@ -269,7 +365,11 @@ export default function TenantRentScreen() {
             />
           }
           renderItem={({ item }) => {
-            const billAmount = item.totalAmount ?? item.amount ?? 0;
+            const billMonth = (item as any).billingMonth || item.month;
+            const billYear = (item as any).billingYear || item.year;
+            const pendingVal = extractPendingAmount(item);
+            const totalVal = item.totalAmount ?? 0;
+
             return (
               <View style={styles.card}>
                 <View style={styles.cardHeaderRow}>
@@ -283,7 +383,7 @@ export default function TenantRentScreen() {
                     </View>
                     <View>
                       <Text style={styles.cardTitle}>
-                        {ALL_MONTHS[item.month] || "Month"} {item.year} Rent
+                        {ALL_MONTHS[billMonth] || "Month"} {billYear} Rent
                       </Text>
                       <View style={styles.statusBadgePending}>
                         <Text style={styles.statusBadgePendingText}>
@@ -292,9 +392,22 @@ export default function TenantRentScreen() {
                       </View>
                     </View>
                   </View>
-                  <Text style={styles.amountText}>
-                    ₹{billAmount.toLocaleString()}
-                  </Text>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <Text style={styles.amountText}>
+                      ₹{pendingVal.toLocaleString()}
+                    </Text>
+                    {totalVal > pendingVal && (
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          color: "#94A3B8",
+                          textDecorationLine: "line-through",
+                        }}
+                      >
+                        Total: ₹{totalVal.toLocaleString()}
+                      </Text>
+                    )}
+                  </View>
                 </View>
 
                 <TouchableOpacity
@@ -342,7 +455,11 @@ export default function TenantRentScreen() {
             />
           }
           renderItem={({ item }) => (
-            <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.card}
+              onPress={() => handleOpenReceiptModal(item)}
+              activeOpacity={0.85}
+            >
               <View style={styles.cardHeaderRow}>
                 <View style={styles.row}>
                   <View
@@ -359,16 +476,23 @@ export default function TenantRentScreen() {
                   </View>
                   <View>
                     <Text style={styles.cardTitle}>
-                      {item.paymentMode || "Online Payment"}
+                      {getPaymentModeLabel(item.paymentMode)} Payment
                     </Text>
                     <Text style={styles.cardSub}>
                       Txn: {item.transactionId || "N/A"}
                     </Text>
                   </View>
                 </View>
-                <Text style={[styles.amountText, { color: "#34D399" }]}>
-                  ₹{item.amountPaid?.toLocaleString()}
-                </Text>
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text style={[styles.amountText, { color: "#34D399" }]}>
+                    ₹{item.amountPaid?.toLocaleString()}
+                  </Text>
+                  <Text
+                    style={{ fontSize: 10, color: "#38BDF8", marginTop: 2 }}
+                  >
+                    View Receipt 📄
+                  </Text>
+                </View>
               </View>
 
               <View style={styles.historyDetailsFooter}>
@@ -381,7 +505,7 @@ export default function TenantRentScreen() {
                     : ""}
                 </Text>
               </View>
-            </View>
+            </TouchableOpacity>
           )}
           ListEmptyComponent={
             <View style={styles.emptyBox}>
@@ -408,7 +532,7 @@ export default function TenantRentScreen() {
               <View>
                 <Text style={styles.modalTitle}>Submit Payment</Text>
                 <Text style={styles.modalSubTitle}>
-                  Enter details after paying via UPI/Cash
+                  Enter details after paying
                 </Text>
               </View>
               <TouchableOpacity
@@ -422,26 +546,49 @@ export default function TenantRentScreen() {
             <Text style={styles.inputLabel}>Amount Paid (₹)</Text>
             <TextInput
               style={styles.input}
-              placeholder="e.g. 4500"
+              placeholder="e.g. 4000"
               placeholderTextColor="#475569"
               keyboardType="numeric"
               value={amountPaid}
               onChangeText={setAmountPaid}
             />
 
+            {/* Payment Method Selector */}
             <Text style={styles.inputLabel}>Payment Method</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="UPI, GooglePay, PhonePe, Cash"
-              placeholderTextColor="#475569"
-              value={paymentMode}
-              onChangeText={setPaymentMode}
-            />
+            <View style={styles.paymentModeContainer}>
+              {["UPI", "Cash", "Bank Transfer"].map((mode) => {
+                const isSelected = paymentMode === mode;
+                return (
+                  <TouchableOpacity
+                    key={mode}
+                    onPress={() => setPaymentMode(mode)}
+                    style={[
+                      styles.paymentModeBtn,
+                      isSelected && styles.paymentModeBtnActive,
+                    ]}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.paymentModeText,
+                        isSelected && styles.paymentModeTextActive,
+                      ]}
+                    >
+                      {mode}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
             <Text style={styles.inputLabel}>Transaction ID / UTR Number *</Text>
             <TextInput
               style={styles.input}
-              placeholder="Enter 12-digit UPI Transaction reference"
+              placeholder={
+                paymentMode === "Cash"
+                  ? "Enter Cash receipt number"
+                  : "Enter 12-digit transaction UTR"
+              }
               placeholderTextColor="#475569"
               value={transactionId}
               onChangeText={setTransactionId}
@@ -472,6 +619,165 @@ export default function TenantRentScreen() {
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Clean Professional Receipt Viewer Modal */}
+      <Modal
+        visible={isReceiptModalVisible}
+        animationType="fade"
+        transparent={true}
+      >
+        <View style={styles.receiptOverlay}>
+          <View style={styles.receiptCard}>
+            {/* Header */}
+            <View style={styles.receiptHeader}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <View style={styles.receiptIconBox}>
+                  <Ionicons name="receipt-outline" size={18} color="#38BDF8" />
+                </View>
+                <View>
+                  <Text style={styles.receiptTitle}>Payment Receipt</Text>
+                  <Text style={styles.receiptSubId}>
+                    {(selectedReceipt as any)?.receiptNumber ||
+                      `REF-${selectedReceipt?.id || "REC"}`}
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => setIsReceiptModalVisible(false)}
+                style={styles.receiptCloseBtn}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={15} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+            {/* Compact Info Box */}
+            <View style={styles.receiptInfoBox}>
+              <View style={styles.receiptAmountRow}>
+                <Text style={styles.receiptAmountLabel}>Paid Amount</Text>
+                <Text style={styles.receiptAmountVal}>
+                  ₹{selectedReceipt?.amountPaid?.toLocaleString()}
+                </Text>
+              </View>
+
+              <View style={styles.receiptDetailRow}>
+                <Text style={styles.receiptKey}>Tenant</Text>
+                <Text style={styles.receiptVal}>{getTenantName()}</Text>
+              </View>
+
+              <View style={styles.receiptDetailRow}>
+                <Text style={styles.receiptKey}>Property</Text>
+                <Text style={styles.receiptVal}>{getApartmentName()}</Text>
+              </View>
+
+              <View style={styles.receiptDetailRow}>
+                <Text style={styles.receiptKey}>Room No</Text>
+                <Text style={styles.receiptVal}>{getRoomNumber()}</Text>
+              </View>
+
+              <View style={styles.receiptDetailRow}>
+                <Text style={styles.receiptKey}>UTR / Txn ID</Text>
+                <Text
+                  style={[
+                    styles.receiptVal,
+                    {
+                      fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                    },
+                  ]}
+                >
+                  {selectedReceipt?.transactionId || "N/A"}
+                </Text>
+              </View>
+
+              <View style={styles.receiptDetailRow}>
+                <Text style={styles.receiptKey}>Method</Text>
+                <Text style={styles.receiptVal}>
+                  {getPaymentModeLabel(selectedReceipt?.paymentMode)}
+                </Text>
+              </View>
+
+              <View style={[styles.receiptDetailRow, { marginBottom: 0 }]}>
+                <Text style={styles.receiptKey}>Date</Text>
+                <Text style={styles.receiptVal}>
+                  {selectedReceipt?.paymentDate
+                    ? new Date(selectedReceipt.paymentDate).toLocaleDateString(
+                        "en-IN",
+                        {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        },
+                      )
+                    : "N/A"}
+                </Text>
+              </View>
+            </View>
+            {/* Actions */}
+            <TouchableOpacity
+              style={styles.previewBtn}
+              onPress={() => {
+                if (selectedReceipt) {
+                  const receipt: any = selectedReceipt;
+                  const tenantInfo = {
+                    month: receipt.rent?.billingMonth || "Current",
+                    year: receipt.rent?.billingYear || "Year",
+                    tenant: getTenantName(),
+                    phone: cachedTenantInfo?.phone || "",
+                    apartmentName: getApartmentName(),
+                    room: getRoomNumber(),
+                  };
+                  pdfReceiptService.previewPDF(selectedReceipt, tenantInfo);
+                }
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons
+                name="eye-outline"
+                size={16}
+                color="#FFFFFF"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.btnTextWhite}>Preview PDF</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.shareBtn}
+              onPress={() => {
+                if (selectedReceipt) {
+                  const receipt: any = selectedReceipt;
+                  const tenantInfo = {
+                    month: receipt.rent?.billingMonth || "Current",
+                    year: receipt.rent?.billingYear || "Year",
+                    tenant: getTenantName(),
+                    phone: cachedTenantInfo?.phone || "",
+                    apartmentName: getApartmentName(),
+                    room: getRoomNumber(),
+                  };
+                  pdfReceiptService.regenerateAndSharePDF(
+                    selectedReceipt,
+                    tenantInfo,
+                  );
+                }
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons
+                name="share-social-outline"
+                size={16}
+                color="#FFFFFF"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.btnTextWhite}>Share Receipt</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.receiptCloseTextBtn}
+              onPress={() => setIsReceiptModalVisible(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.receiptCloseText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );

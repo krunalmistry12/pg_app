@@ -1,12 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Keyboard,
   Modal,
   SafeAreaView,
   ScrollView,
-  StyleSheet,
   Switch,
   Text,
   TextInput,
@@ -14,19 +15,50 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
+import { styles } from "../src/styles/Admin/AdminNoticesStyles";
+
+// Minimal local stub for noticeService to avoid "Cannot find name 'noticeService'".
+// Replace with actual service import when available, e.g.:
+// import noticeService from '../src/services/noticeService';
+const noticeService: any = {
+  getAdminFlats: async (_userId: string) => {
+    return [];
+  },
+  getNotices: async (_flatId: string | null) => {
+    return [];
+  },
+  createNotice: async (_payload: any) => {
+    return { status: 200, data: { success: true } };
+  },
+};
+
+interface NoticeItem {
+  id: string;
+  flatId?: string | null;
+  pgName: string;
+  title: string;
+  desc: string;
+  date: string;
+  urgent: boolean;
+}
 
 export default function AdminNoticesScreen() {
   const router = useRouter();
 
-  const pgBranches = [
-    "All PGs (Common)",
-    "Sunrise PG (Branch 1)",
-    "Elite Boys PG (Branch 2)",
-    "Co-Living PG (Branch 3)",
-  ];
-  const [selectedPG, setSelectedPG] = useState(pgBranches[0]);
+  const [pgBranches, setPgBranches] = useState<
+    { id: string | null; name: string }[]
+  >([{ id: null, name: "All PGs (Common)" }]);
 
-  // Tab state: 'today' or 'previous'
+  const [selectedPG, setSelectedPG] = useState<{
+    id: string | null;
+    name: string;
+  }>({
+    id: null,
+    name: "All PGs (Common)",
+  });
+
+  const [loadingFlats, setLoadingFlats] = useState<boolean>(true);
+  const [loadingNotices, setLoadingNotices] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState("today");
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -35,62 +67,111 @@ export default function AdminNoticesScreen() {
   const [isUrgent, setIsUrgent] = useState(false);
   const [sendNotification, setSendNotification] = useState(true);
 
-  const [notices, setNotices] = useState([
-    {
-      id: "1",
-      pgName: "All PGs (Common)",
-      title: "Monthly Rent Deadline Reminder",
-      desc: "Please clear your rent before 7th of this month to avoid late fees.",
-      date: "05 Jun 2026",
-      urgent: true,
-    },
-    {
-      id: "2",
-      pgName: "Sunrise PG (Branch 1)",
-      title: "Water Supply Maintenance",
-      desc: "Water supply will be shut down tomorrow from 10 AM to 1 PM for tank cleaning.",
-      date: "02 Jun 2026",
-      urgent: false,
-    },
-  ]);
+  const [notices, setNotices] = useState<NoticeItem[]>([]);
 
-  const handlePostNotice = () => {
-    Keyboard.dismiss();
-    if (!title || !desc) return;
-    const newNotice = {
-      id: Date.now().toString(),
-      pgName: selectedPG,
-      title,
-      desc,
-      date: "Today",
-      urgent: isUrgent,
-    };
-    setNotices([newNotice, ...notices]);
+  useEffect(() => {
+    loadFlatsAndNotices();
+  }, []);
 
-    if (sendNotification) {
-      // WhatsApp / SMS API integration logic here
+  useEffect(() => {
+    loadNotices(selectedPG.id);
+  }, [selectedPG]);
+
+  const loadFlatsAndNotices = async () => {
+    try {
+      setLoadingFlats(true);
+      const storedUserId = await AsyncStorage.getItem("userId");
+      if (!storedUserId) {
+        setLoadingFlats(false);
+        return;
+      }
+
+      const flatList = await noticeService.getAdminFlats(storedUserId);
+
+      const dynamicFlats = flatList.map((flat: any) => ({
+        id: flat.Id,
+        name: `${flat.ApartmentName} (${flat.FlatNumber})`,
+      }));
+
+      setPgBranches([{ id: null, name: "All PGs (Common)" }, ...dynamicFlats]);
+    } catch (error) {
+      console.log("Failed to load flats", error);
+    } finally {
+      setLoadingFlats(false);
     }
-
-    setTitle("");
-    setDesc("");
-    setIsUrgent(false);
-    setSendNotification(true);
-    setModalVisible(false);
-    setActiveTab("today"); // Switch to today tab automatically when new notice is posted
   };
 
-  // Filter based on selected PG
-  const branchFilteredNotices = notices.filter(
-    (item) => item.pgName === selectedPG || item.pgName === "All PGs (Common)",
-  );
+  const loadNotices = async (flatId: string | null) => {
+    try {
+      setLoadingNotices(true);
+      console.log("=== CALLING API WITH FLATID ===", flatId); // <--- Yeh print karke dekhein
 
-  // Separate Today's notices and Previous notices
-  const todayNotices = branchFilteredNotices.filter(
-    (item) => item.date === "Today",
-  );
-  const previousNotices = branchFilteredNotices.filter(
-    (item) => item.date !== "Today",
-  );
+      const response = await noticeService.getNotices(flatId);
+      console.log("=== RAW API RESPONSE ===", response);
+      console.log("=== RAW API RESPONSE ===", response);
+
+      // Agar response object ke andar 'data' array hai toh use extract karein
+      const rawList = Array.isArray(response) ? response : response?.data || [];
+
+      const formattedNotices = rawList.map((item: any) => ({
+        id: item.id || item.Id || Math.random().toString(),
+        flatId: item.flatId || item.FlatId || null,
+        pgName: item.pgName || item.PgName || selectedPG.name,
+        title: item.title || item.Title || "Untitled",
+        desc: item.desc || item.description || item.Description || "",
+        date: item.date || item.Date || "Today", // Ensure karein ki date "Today" match kare
+        urgent:
+          item.urgent !== undefined
+            ? item.urgent
+            : item.IsUrgent !== undefined
+              ? item.IsUrgent
+              : false,
+      }));
+
+      console.log("=== FORMATTED NOTICES ===", formattedNotices);
+      setNotices(formattedNotices);
+    } catch (error) {
+      console.log("Failed to fetch admin notices", error);
+    } finally {
+      setLoadingNotices(false);
+    }
+  };
+  const handlePostNotice = async () => {
+    Keyboard.dismiss();
+    if (!title || !desc) return;
+
+    try {
+      const storedUserId =
+        (await AsyncStorage.getItem("userId")) || "admin_user_01";
+
+      const payload = {
+        title,
+        description: desc,
+        flatId: selectedPG.id,
+        isUrgent: isUrgent,
+        sendNotification: sendNotification,
+        createdByAdminId: storedUserId,
+      };
+
+      const response = await noticeService.createNotice(payload);
+
+      if (response.status === 200 || response.data?.success) {
+        loadNotices(selectedPG.id);
+
+        setTitle("");
+        setDesc("");
+        setIsUrgent(false);
+        setSendNotification(true);
+        setModalVisible(false);
+        setActiveTab("today");
+      }
+    } catch (error) {
+      console.log("Failed to post notice", error);
+    }
+  };
+
+  const todayNotices = notices.filter((item) => item.date === "Today");
+  const previousNotices = notices.filter((item) => item.date !== "Today");
 
   return (
     <SafeAreaView style={styles.container}>
@@ -113,42 +194,46 @@ export default function AdminNoticesScreen() {
 
       {/* PG / Common Branch Selector Bar */}
       <View style={styles.pgBarContainer}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.scrollRow}
-        >
-          {pgBranches.map((pg) => (
-            <TouchableOpacity
-              key={pg}
-              style={[
-                styles.pgChip,
-                selectedPG === pg && styles.pgChipActive,
-                pg === "All PGs (Common)" && styles.commonChip,
-              ]}
-              onPress={() => setSelectedPG(pg)}
-            >
-              <Ionicons
-                name={
-                  pg === "All PGs (Common)"
-                    ? "globe-outline"
-                    : "business-outline"
-                }
-                size={14}
-                color={selectedPG === pg ? "#FFF" : "#4B5563"}
-                style={{ marginRight: 6 }}
-              />
-              <Text
+        {loadingFlats ? (
+          <ActivityIndicator
+            size="small"
+            color="#06B6D4"
+            style={{ marginVertical: 6 }}
+          />
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.scrollRow}
+          >
+            {pgBranches.map((pg) => (
+              <TouchableOpacity
+                key={pg.id || "common"}
                 style={[
-                  styles.pgChipText,
-                  selectedPG === pg && styles.pgChipTextActive,
+                  styles.pgChip,
+                  selectedPG.name === pg.name && styles.pgChipActive,
+                  pg.id === null && styles.commonChip,
                 ]}
+                onPress={() => setSelectedPG(pg)}
               >
-                {pg}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+                <Ionicons
+                  name={pg.id === null ? "globe-outline" : "business-outline"}
+                  size={14}
+                  color={selectedPG.name === pg.name ? "#FFF" : "#4B5563"}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[
+                    styles.pgChipText,
+                    selectedPG.name === pg.name && styles.pgChipTextActive,
+                  ]}
+                >
+                  {pg.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
       </View>
 
       {/* Notice Section Switcher Tabs */}
@@ -202,10 +287,7 @@ export default function AdminNoticesScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View
-          style={[
-            styles.banner,
-            selectedPG === "All PGs (Common)" && styles.commonBanner,
-          ]}
+          style={[styles.banner, selectedPG.id === null && styles.commonBanner]}
         >
           <Ionicons
             name="megaphone-outline"
@@ -213,7 +295,7 @@ export default function AdminNoticesScreen() {
             color="#38BDF8"
             style={{ marginBottom: 4 }}
           />
-          <Text style={styles.bannerLabel}>{selectedPG}</Text>
+          <Text style={styles.bannerLabel}>{selectedPG.name}</Text>
           <Text style={styles.bannerSubLabel}>
             {activeTab === "today"
               ? "Today's Active Broadcasts"
@@ -221,8 +303,13 @@ export default function AdminNoticesScreen() {
           </Text>
         </View>
 
-        {/* Display content based on active tab */}
-        {activeTab === "today" ? (
+        {loadingNotices ? (
+          <ActivityIndicator
+            size="large"
+            color="#06B6D4"
+            style={{ marginTop: 30 }}
+          />
+        ) : activeTab === "today" ? (
           <>
             {todayNotices.length === 0 ? (
               <View style={styles.emptyContainer}>
@@ -232,7 +319,7 @@ export default function AdminNoticesScreen() {
                   color="#D1D5DB"
                 />
                 <Text style={styles.emptyText}>
-                  No new notices posted for today in {selectedPG}
+                  No new notices posted for today in {selectedPG.name}
                 </Text>
               </View>
             ) : (
@@ -283,7 +370,7 @@ export default function AdminNoticesScreen() {
               <View style={styles.emptyContainer}>
                 <Ionicons name="archive-outline" size={40} color="#D1D5DB" />
                 <Text style={styles.emptyText}>
-                  No previous history available for {selectedPG}
+                  No previous history available for {selectedPG.name}
                 </Text>
               </View>
             ) : (
@@ -352,7 +439,7 @@ export default function AdminNoticesScreen() {
                 <Text style={styles.targetPgText}>
                   Target Group:{" "}
                   <Text style={{ fontWeight: "bold", color: "#06B6D4" }}>
-                    {selectedPG}
+                    {selectedPG.name}
                   </Text>
                 </Text>
 
@@ -381,7 +468,6 @@ export default function AdminNoticesScreen() {
                   onSubmitEditing={Keyboard.dismiss}
                 />
 
-                {/* Urgent Switch Toggle */}
                 <View style={styles.switchRow}>
                   <View style={{ flex: 1, marginRight: 10 }}>
                     <Text style={styles.switchLabel}>Mark as Urgent</Text>
@@ -397,7 +483,6 @@ export default function AdminNoticesScreen() {
                   />
                 </View>
 
-                {/* Send WhatsApp / SMS Switch Toggle */}
                 <View style={styles.switchRow}>
                   <View style={{ flex: 1, marginRight: 10 }}>
                     <Text style={styles.switchLabel}>
@@ -429,244 +514,3 @@ export default function AdminNoticesScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8F9FA" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: 16,
-    backgroundColor: "#FFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  headerTitle: { fontSize: 17, fontWeight: "bold", color: "#1A1A1A" },
-  backButton: { padding: 4 },
-  addButtonHeader: {
-    backgroundColor: "#06B6D4",
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  pgBarContainer: {
-    backgroundColor: "#FFF",
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
-  },
-  scrollRow: { paddingHorizontal: 16 },
-
-  pgChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "#F3F4F6",
-    marginRight: 8,
-  },
-  pgChipActive: { backgroundColor: "#0F172A" },
-  commonChip: { borderWidth: 1, borderColor: "#06B6D4", borderStyle: "dashed" },
-  pgChipText: { fontSize: 13, fontWeight: "600", color: "#4B5563" },
-  pgChipTextActive: { color: "#FFF" },
-
-  tabContainer: {
-    flexDirection: "row",
-    backgroundColor: "#FFF",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  tabButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: "#F3F4F6",
-    marginHorizontal: 4,
-  },
-  activeTabButton: {
-    backgroundColor: "#ECFEFF",
-    borderWidth: 1,
-    borderColor: "#06B6D4",
-  },
-  tabText: { fontSize: 12, fontWeight: "600", color: "#6B7280" },
-  activeTabText: { color: "#0E7490", fontWeight: "bold" },
-
-  scrollContent: { padding: 16 },
-  banner: {
-    backgroundColor: "#0F172A",
-    borderRadius: 14,
-    padding: 20,
-    alignItems: "center",
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  commonBanner: { backgroundColor: "#0369A1" },
-  bannerLabel: {
-    color: "#38BDF8",
-    fontSize: 16,
-    fontWeight: "bold",
-    marginBottom: 2,
-    textAlign: "center",
-  },
-  bannerSubLabel: { color: "#94A3B8", fontSize: 12, fontWeight: "500" },
-
-  card: {
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    shadowColor: "#000",
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  archiveCard: {
-    backgroundColor: "#F9FAFB",
-    borderColor: "#E5E7EB",
-  },
-  urgentCard: { borderColor: "#FCA5A5", backgroundColor: "#FEF2F2" },
-  cardHeaderTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 8,
-  },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    marginRight: 8,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#ECFEFF",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  archiveIconContainer: {
-    backgroundColor: "#F3F4F6",
-  },
-  urgentIconContainer: { backgroundColor: "#FEE2E2" },
-  noticeTitle: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#1F2937",
-    marginBottom: 2,
-  },
-  noticeCategory: { fontSize: 11, color: "#6B7280" },
-
-  urgentBadge: {
-    backgroundColor: "#EF4444",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  urgentText: { color: "#FFF", fontSize: 10, fontWeight: "bold" },
-  noticeDesc: { fontSize: 13, color: "#4B5563", lineHeight: 18, marginTop: 4 },
-
-  emptyContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 40,
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  emptyText: {
-    color: "#9CA3AF",
-    fontSize: 12,
-    marginTop: 8,
-    textAlign: "center",
-    paddingHorizontal: 16,
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalContent: {
-    width: "90%",
-    backgroundColor: "#FFF",
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  modalHeaderTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  modalTitle: { fontSize: 18, fontWeight: "bold", color: "#1A1A1A" },
-  targetPgText: {
-    fontSize: 12,
-    color: "#4B5563",
-    marginBottom: 14,
-    backgroundColor: "#F0FDF4",
-    padding: 8,
-    borderRadius: 6,
-  },
-  inputLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#4B5563",
-    marginBottom: 6,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    color: "#1A1A1A",
-    marginBottom: 12,
-    backgroundColor: "#F9FAFB",
-  },
-  textArea: { height: 90, textAlignVertical: "top" },
-
-  switchRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#F9FAFB",
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  switchLabel: { fontSize: 13, fontWeight: "bold", color: "#1F2937" },
-  switchSub: { fontSize: 11, color: "#6B7280" },
-
-  saveBtn: {
-    backgroundColor: "#06B6D4",
-    borderRadius: 8,
-    padding: 14,
-    alignItems: "center",
-    marginTop: 6,
-  },
-  saveBtnText: { color: "#FFF", fontWeight: "bold", fontSize: 15 },
-});
