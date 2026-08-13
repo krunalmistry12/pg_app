@@ -130,6 +130,7 @@ export const updateTenantStatusApi = async (
   });
   return response.data;
 };
+
 export interface TenantProfile {
   name: string;
   roomNumber: string;
@@ -139,15 +140,7 @@ export interface TenantProfile {
   dueDate: string;
   isRentPaid: boolean;
   pgName: string;
-}
-
-export interface TenantProfile {
-  name: string;
-  roomNumber: string;
-  rentAmount: number;
-  dueDate: string;
-  isRentPaid: boolean;
-  pgName: string;
+  flatId?: string | number | null; // Added flatId here for seamless notice fetching
 }
 
 export const tenantService = {
@@ -195,7 +188,6 @@ export const tenantService = {
         const billsData = billsResponse.data?.data || billsResponse.data;
 
         if (Array.isArray(billsData) && billsData.length > 0) {
-          // Pehla ya current bill uthayein
           const currentBill = billsData[0];
 
           finalTotalRent =
@@ -241,6 +233,7 @@ export const tenantService = {
             : currentMonthName,
           isRentPaid: isPaid,
           pgName: resData.apartmentName || "PG Accommodation",
+          flatId: resData.flatId || resData.FlatId || resData.flat_id || null, // Mapped flatId properly
         };
       }
       return null;

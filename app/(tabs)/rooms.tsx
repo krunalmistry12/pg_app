@@ -371,9 +371,14 @@ export default function RoomsScreen() {
   const fetchFlatsFromAPI = async () => {
     try {
       const storedUserId = await AsyncStorage.getItem("userId");
-const storedToken = await AsyncStorage.getItem("token");
+      const storedToken = await AsyncStorage.getItem("token");
 
-    console.log("👉 CHECKING STORAGE -> userId:", storedUserId, "| token:", storedToken ? "Available" : "Missing");
+      console.log(
+        "👉 CHECKING STORAGE -> userId:",
+        storedUserId,
+        "| token:",
+        storedToken ? "Available" : "Missing",
+      );
       if (!storedUserId) {
         await loadFromLocalStorage();
         return;
@@ -381,9 +386,12 @@ const storedToken = await AsyncStorage.getItem("token");
 
       // Load cache first for instant feedback
       const cached = await AsyncStorage.getItem("flats_2bhk");
-      if (cached && flats.length === 0) {
-        setFlats(JSON.parse(cached));
-        setLoading(false);
+      if (cached) {
+        const parsedCache = JSON.parse(cached);
+        if (Array.isArray(parsedCache) && parsedCache.length > 0) {
+          setFlats(parsedCache);
+          setLoading(false);
+        }
       }
 
       const response = await api.get(`/Flats/user/${storedUserId}`);
@@ -461,11 +469,9 @@ const storedToken = await AsyncStorage.getItem("token");
           };
         });
 
-        setFlats(formattedFlats);
-        await AsyncStorage.setItem(
-          "flats_2bhk",
-          JSON.stringify(formattedFlats),
-        );
+        const finalFlats = Array.isArray(formattedFlats) ? formattedFlats : [];
+        setFlats(finalFlats);
+        await AsyncStorage.setItem("flats_2bhk", JSON.stringify(finalFlats));
       }
     } catch (error: any) {
       await loadFromLocalStorage();
@@ -479,16 +485,17 @@ const storedToken = await AsyncStorage.getItem("token");
     try {
       const data = await AsyncStorage.getItem("flats_2bhk");
       if (data) {
-        setFlats(JSON.parse(data));
+        const parsed = JSON.parse(data);
+        setFlats(Array.isArray(parsed) ? parsed : []);
       }
     } catch (err) {
       console.error("Failed to load local storage:", err);
+      setFlats([]);
     }
   };
 
   useFocusEffect(
     useCallback(() => {
-      if (flats.length === 0) setLoading(true);
       fetchFlatsFromAPI();
     }, []),
   );
@@ -500,12 +507,13 @@ const storedToken = await AsyncStorage.getItem("token");
 
   // 📊 --- Global Top Header Stats Calculation ---
   const globalStats = useMemo(() => {
-    let totalFlats = flats.length;
+    const safeFlats = Array.isArray(flats) ? flats : [];
+    let totalFlats = safeFlats.length;
     let totalBeds = 0;
     let occupiedBeds = 0;
     let totalRevenue = 0;
 
-    flats.forEach((f) => {
+    safeFlats.forEach((f) => {
       f.zones?.forEach((z) => {
         const zoneCapacity = z.capacity || z.beds?.length || 0;
         totalBeds += zoneCapacity;
@@ -543,7 +551,8 @@ const storedToken = await AsyncStorage.getItem("token");
 
   // --- Filter & Search Logic ---
   const filteredFlats = useMemo(() => {
-    return flats.filter((flat) => {
+    const safeFlats = Array.isArray(flats) ? flats : [];
+    return safeFlats.filter((flat) => {
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
         !q ||
@@ -598,7 +607,8 @@ const storedToken = await AsyncStorage.getItem("token");
     tenantName?: string,
   ) => {
     try {
-      const updatedFlats = flats.map((flat) => {
+      const safeFlats = Array.isArray(flats) ? flats : [];
+      const updatedFlats = safeFlats.map((flat) => {
         if (flat.id !== flatId) return flat;
         return {
           ...flat,
@@ -874,7 +884,7 @@ const storedToken = await AsyncStorage.getItem("token");
       </View>
 
       {/* Flat List with Performance Enhancements */}
-      {loading && flats.length === 0 ? (
+      {loading && (!Array.isArray(flats) || flats.length === 0) ? (
         <View style={styles.loaderBox}>
           <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.loadingText}>Fetching Flats & Rooms...</Text>

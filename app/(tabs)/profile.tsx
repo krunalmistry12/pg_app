@@ -1,10 +1,11 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import DateTimePicker from "@react-native-community/datetimepicker"; // <-- Imported Native Picker
+import DateTimePicker from "@react-native-community/datetimepicker";
+import * as Location from "expo-location";
 import * as Print from "expo-print";
 import { router } from "expo-router";
 import * as Sharing from "expo-sharing";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -13,12 +14,24 @@ import {
   SafeAreaView,
   ScrollView,
   StatusBar,
-  StyleSheet,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
+import { styles } from "../../src/styles/Admin/ProfileStyles ";
 import { ReportFormatter } from "../../src/utils/ReportBuilder";
+
+interface AdminProfileData {
+  name: string;
+  email: string;
+  role: string;
+  pgName: string;
+  location: string;
+  branches: string[];
+}
+
+const STORAGE_KEY = "@dashboard_cache_data";
 
 export default function Profile() {
   const [isReportModalVisible, setIsReportModalVisible] = useState(false);
@@ -26,42 +39,133 @@ export default function Profile() {
     "rent" | "expense" | "tenants"
   >("rent");
 
+  // Initial state
+  const [adminProfile, setAdminProfile] = useState<AdminProfileData>({
+    name: "Loading...",
+    email: "",
+    role: "PG Administrator",
+    pgName: "My PG Property",
+    location: "Fetching location...",
+    branches: ["Main Branch"],
+  });
+
   // Selection States
-  const [selectedDate, setSelectedDate] = useState(new Date()); // Native Date object
-  const [showDatePicker, setShowDatePicker] = useState(false); // Native picker visibility
-  const [selectedBranch, setSelectedBranch] = useState(
-    "Kunal PG - Main Branch",
-  );
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState("Main Branch");
 
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const branchList = [
-    "Kunal PG - Main Branch",
-    "Kunal PG - Annex Branch",
-    "Kunal PG - Executive Wing",
-  ];
+  useEffect(() => {
+    loadAdminDetails();
+  }, []);
 
-  // Helper to format date nicely (e.g., "August 2026")
+  const fetchCurrentLocationArea = async (): Promise<string> => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        console.log("Location permission denied");
+        return "Ahmedabad"; // Fallback location
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const reverseGeocode = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+
+      if (reverseGeocode && reverseGeocode.length > 0) {
+        const address = reverseGeocode[0];
+        const area = address.district || address.city || "Ahmedabad";
+        return area;
+      }
+    } catch (error) {
+      console.log("Error fetching location:", error);
+    }
+    return "Ahmedabad";
+  };
+
+  const loadAdminDetails = async () => {
+    try {
+      console.log(
+        `Attempting to load admin profile from AsyncStorage using key: ${STORAGE_KEY}`,
+      );
+      const storedData = await AsyncStorage.getItem(STORAGE_KEY);
+
+      // Fetch dynamic location area
+      const currentArea = await fetchCurrentLocationArea();
+
+      if (storedData) {
+        const parsed = JSON.parse(storedData);
+        console.log("Admin profile successfully loaded from cache:", parsed);
+
+        const mappedProfile: AdminProfileData = {
+          name: parsed.ownerName || "Administrator",
+          email: parsed.email || "",
+          role: "PG Owner & Administrator",
+          pgName: parsed.pgName || "My PG Property",
+          location: parsed.location || currentArea,
+          branches:
+            parsed.branches && parsed.branches.length > 0
+              ? parsed.branches
+              : ["Main Branch"],
+        };
+
+        setAdminProfile(mappedProfile);
+        if (mappedProfile.branches.length > 0) {
+          setSelectedBranch(mappedProfile.branches[0]);
+        }
+      } else {
+        console.log(
+          `Log: Cannot show user detail - No data found in AsyncStorage for key: ${STORAGE_KEY}`,
+        );
+
+        const freshData: AdminProfileData = {
+          name: "Administrator",
+          email: "",
+          role: "PG Owner & Administrator",
+          pgName: "My PG Property",
+          location: currentArea,
+          branches: ["Main Branch"],
+        };
+
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(freshData));
+        setAdminProfile(freshData);
+        if (freshData.branches.length > 0) {
+          setSelectedBranch(freshData.branches[0]);
+        }
+      }
+    } catch (e) {
+      console.log("Error loading/saving admin profile from storage:", e);
+    }
+  };
+
   const formatMonthYear = (date: Date) => {
     return date.toLocaleString("default", { month: "long", year: "numeric" });
   };
 
   const onDateChange = (event: any, date?: Date) => {
-    setShowDatePicker(Platform.OS === "ios"); // iOS ke liye open rakhte hain, Android par auto-close hota hai
+    if (Platform.OS === "android") {
+      setShowDatePicker(false);
+    }
     if (date) {
       setSelectedDate(date);
     }
   };
 
   const logout = async () => {
-    Alert.alert("Logout", "Kya aap sach mein logout karna chahte hain?", [
+    Alert.alert("Logout", "Are you sure you want to log out?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Logout",
         style: "destructive",
         onPress: async () => {
           await AsyncStorage.removeItem("isLoggedIn");
+          await AsyncStorage.removeItem(STORAGE_KEY);
           router.replace("/login");
         },
       },
@@ -77,14 +181,17 @@ export default function Profile() {
     setIsGenerating(true);
 
     try {
+      console.log("Generating HTML content...");
       const htmlContent = ReportFormatter.generateHTML({
         branch: selectedBranch,
         month: formatMonthYear(selectedDate),
-        generatedBy: "Kunal Mistry (Admin)",
+        generatedBy: `${adminProfile.name} (Admin)`,
         reportType: selectedReportType,
       });
 
+      console.log("Calling Print.printToFileAsync...");
       const file = await Print.printToFileAsync({ html: htmlContent });
+      console.log("Print result file:", file);
 
       if (!file || !file.uri) {
         throw new Error("PDF generation returned an invalid URI.");
@@ -92,7 +199,8 @@ export default function Profile() {
 
       setIsGenerating(false);
 
-      if (await Sharing.isAvailableAsync()) {
+      const isSharingAvailable = await Sharing.isAvailableAsync();
+      if (isSharingAvailable) {
         await Sharing.shareAsync(file.uri, {
           mimeType: "application/pdf",
           dialogTitle: "Save or Share Report PDF",
@@ -105,10 +213,10 @@ export default function Profile() {
       setIsReportModalVisible(false);
     } catch (error: any) {
       setIsGenerating(false);
-      console.error("PDF Generation Error:", error);
+      console.error("PDF Generation Detailed Error:", error);
       Alert.alert(
-        "Error",
-        `Failed to generate report PDF: ${error?.message || "Unknown error"}`,
+        "PDF Error",
+        `Failed: ${error?.message || "Unknown error"}. Check console logs.`,
       );
     }
   };
@@ -121,16 +229,27 @@ export default function Profile() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
       >
-        <Text style={styles.screenTitle}>Admin Account</Text>
+        <Text style={styles.screenTitle}>Admin Dashboard</Text>
 
-        {/* Profile Card */}
+        {/* Dynamic Profile Card */}
         <View style={styles.profileCard}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>K</Text>
+          <View style={styles.avatarGlowContainer}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {adminProfile.name && adminProfile.name !== "Loading..."
+                  ? adminProfile.name.charAt(0).toUpperCase()
+                  : "A"}
+              </Text>
+            </View>
           </View>
-          <Text style={styles.name}>Kunal Mistry</Text>
-          <Text style={styles.role}>PG Owner & Administrator</Text>
-          <Text style={styles.pg}>Kunal PG • Ahmedabad</Text>
+          <Text style={styles.name}>{adminProfile.name}</Text>
+          <Text style={styles.role}>{adminProfile.role}</Text>
+          <View style={styles.pgBadge}>
+            <Ionicons name="business-outline" size={12} color="#38BDF8" />
+            <Text style={styles.pgBadgeText}>
+              {adminProfile.pgName} • {adminProfile.location}
+            </Text>
+          </View>
         </View>
 
         {/* Core Directory */}
@@ -139,6 +258,7 @@ export default function Profile() {
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() => router.push("/tenants" as any)}
+          activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
             <View
@@ -147,9 +267,14 @@ export default function Profile() {
                 { backgroundColor: "rgba(16, 185, 129, 0.12)" },
               ]}
             >
-              <Ionicons name="people-outline" size={16} color="#10B981" />
+              <Ionicons name="people-outline" size={18} color="#10B981" />
             </View>
-            <Text style={styles.menuText}>Tenants Directory</Text>
+            <View>
+              <Text style={styles.menuText}>Tenants Directory</Text>
+              <Text style={styles.menuSubText}>
+                Manage active residents & rooms
+              </Text>
+            </View>
           </View>
           <Ionicons name="chevron-forward" size={16} color="#64748B" />
         </TouchableOpacity>
@@ -157,6 +282,7 @@ export default function Profile() {
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() => router.push("/rent" as any)}
+          activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
             <View
@@ -165,9 +291,14 @@ export default function Profile() {
                 { backgroundColor: "rgba(245, 158, 11, 0.12)" },
               ]}
             >
-              <Ionicons name="wallet-outline" size={16} color="#F59E0B" />
+              <Ionicons name="wallet-outline" size={18} color="#F59E0B" />
             </View>
-            <Text style={styles.menuText}>Rent & Ledger Records</Text>
+            <View>
+              <Text style={styles.menuText}>Rent & Ledger Records</Text>
+              <Text style={styles.menuSubText}>
+                Track dues, collections & receipts
+              </Text>
+            </View>
           </View>
           <Ionicons name="chevron-forward" size={16} color="#64748B" />
         </TouchableOpacity>
@@ -178,6 +309,7 @@ export default function Profile() {
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() => setIsReportModalVisible(true)}
+          activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
             <View
@@ -188,11 +320,16 @@ export default function Profile() {
             >
               <Ionicons
                 name="document-text-outline"
-                size={16}
+                size={18}
                 color="#0EA5E9"
               />
             </View>
-            <Text style={styles.menuText}>Export Custom Report (PDF)</Text>
+            <View>
+              <Text style={styles.menuText}>Export Custom Report (PDF)</Text>
+              <Text style={styles.menuSubText}>
+                Rent, expenses & tenant logs
+              </Text>
+            </View>
           </View>
           <Ionicons name="download-outline" size={16} color="#0EA5E9" />
         </TouchableOpacity>
@@ -200,8 +337,12 @@ export default function Profile() {
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() =>
-            handleActionAlert("Notice Board", "Broadcast panel opened.")
+            handleActionAlert(
+              "Notice Board",
+              "Broadcast panel opened successfully.",
+            )
           }
+          activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
             <View
@@ -210,9 +351,14 @@ export default function Profile() {
                 { backgroundColor: "rgba(236, 72, 153, 0.12)" },
               ]}
             >
-              <Ionicons name="megaphone-outline" size={16} color="#EC4899" />
+              <Ionicons name="megaphone-outline" size={18} color="#EC4899" />
             </View>
-            <Text style={styles.menuText}>Broadcast Notice Board</Text>
+            <View>
+              <Text style={styles.menuText}>Broadcast Notice Board</Text>
+              <Text style={styles.menuSubText}>
+                Send instant alerts to all flats
+              </Text>
+            </View>
           </View>
           <Ionicons name="chevron-forward" size={16} color="#64748B" />
         </TouchableOpacity>
@@ -220,7 +366,16 @@ export default function Profile() {
         {/* Preferences */}
         <Text style={styles.sectionHeading}>Preferences</Text>
 
-        <TouchableOpacity style={styles.menuItem}>
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() =>
+            handleActionAlert(
+              "App Settings",
+              "Settings configuration is up to date.",
+            )
+          }
+          activeOpacity={0.8}
+        >
           <View style={styles.menuLeft}>
             <View
               style={[
@@ -228,9 +383,14 @@ export default function Profile() {
                 { backgroundColor: "rgba(100, 116, 139, 0.12)" },
               ]}
             >
-              <Ionicons name="settings-outline" size={16} color="#94A3B8" />
+              <Ionicons name="settings-outline" size={18} color="#94A3B8" />
             </View>
-            <Text style={styles.menuText}>App Settings</Text>
+            <View>
+              <Text style={styles.menuText}>App Settings</Text>
+              <Text style={styles.menuSubText}>
+                Preferences & configurations
+              </Text>
+            </View>
           </View>
           <Ionicons name="chevron-forward" size={16} color="#64748B" />
         </TouchableOpacity>
@@ -239,7 +399,7 @@ export default function Profile() {
         <TouchableOpacity
           onPress={logout}
           style={styles.logoutItem}
-          activeOpacity={0.7}
+          activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
             <View
@@ -248,7 +408,7 @@ export default function Profile() {
                 { backgroundColor: "rgba(239, 68, 68, 0.12)" },
               ]}
             >
-              <Ionicons name="log-out-outline" size={16} color="#EF4444" />
+              <Ionicons name="log-out-outline" size={18} color="#EF4444" />
             </View>
             <Text style={styles.logoutText}>Logout Account</Text>
           </View>
@@ -263,339 +423,270 @@ export default function Profile() {
         transparent={true}
         onRequestClose={() => setIsReportModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Download Filtered Report</Text>
-              <TouchableOpacity onPress={() => setIsReportModalVisible(false)}>
-                <Ionicons name="close" size={20} color="#94A3B8" />
-              </TouchableOpacity>
-            </View>
+        <TouchableWithoutFeedback
+          onPress={() => setIsReportModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalContainer}>
+                {/* Drag Handle Bar */}
+                <View style={{ alignItems: "center", marginBottom: 8 }}>
+                  <View
+                    style={{
+                      width: 40,
+                      height: 4,
+                      borderRadius: 2,
+                      backgroundColor: "rgba(255, 255, 255, 0.2)",
+                    }}
+                  />
+                </View>
 
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 20 }}
-            >
-              {/* Select PG Branch Dropdown */}
-              <Text style={styles.filterLabel}>Select Property / Branch</Text>
-              <TouchableOpacity
-                style={styles.dropdownSelector}
-                onPress={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
-              >
-                <Text style={styles.dropdownSelectorText}>
-                  {selectedBranch}
-                </Text>
-                <Ionicons
-                  name={isBranchDropdownOpen ? "chevron-up" : "chevron-down"}
-                  size={16}
-                  color="#94A3B8"
-                />
-              </TouchableOpacity>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>
+                    Download Filtered Report
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setIsReportModalVisible(false)}
+                    style={{
+                      backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      borderRadius: 16,
+                      padding: 5,
+                    }}
+                  >
+                    <Ionicons name="close" size={18} color="#94A3B8" />
+                  </TouchableOpacity>
+                </View>
 
-              {isBranchDropdownOpen && (
-                <View style={styles.dropdownList}>
-                  {branchList.map((branch) => (
-                    <TouchableOpacity
-                      key={branch}
-                      style={[
-                        styles.dropdownItem,
-                        selectedBranch === branch && styles.activeDropdownItem,
-                      ]}
-                      onPress={() => {
-                        setSelectedBranch(branch);
-                        setIsBranchDropdownOpen(false);
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: 25 }}
+                >
+                  {/* Select PG Branch Dropdown */}
+                  <Text style={styles.filterLabel}>
+                    SELECT PROPERTY / BRANCH
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.dropdownSelector}
+                    onPress={() =>
+                      setIsBranchDropdownOpen(!isBranchDropdownOpen)
+                    }
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.dropdownSelectorText}>
+                      {selectedBranch}
+                    </Text>
+                    <Ionicons
+                      name={
+                        isBranchDropdownOpen ? "chevron-up" : "chevron-down"
+                      }
+                      size={16}
+                      color="#94A3B8"
+                    />
+                  </TouchableOpacity>
+
+                  {isBranchDropdownOpen && (
+                    <View style={styles.dropdownList}>
+                      {adminProfile.branches.map((branch) => (
+                        <TouchableOpacity
+                          key={branch}
+                          style={[
+                            styles.dropdownItem,
+                            selectedBranch === branch &&
+                              styles.activeDropdownItem,
+                          ]}
+                          onPress={() => {
+                            setSelectedBranch(branch);
+                            setIsBranchDropdownOpen(false);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.dropdownItemText,
+                              selectedBranch === branch &&
+                                styles.activeDropdownItemText,
+                            ]}
+                          >
+                            {branch}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* CLICKABLE NATIVE DATE PICKER TRIGGER */}
+                  <Text style={styles.filterLabel}>
+                    REPORT PERIOD (MONTH & YEAR)
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.datePickerTrigger}
+                    onPress={() => setShowDatePicker(true)}
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
                       }}
                     >
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          selectedBranch === branch &&
-                            styles.activeDropdownItemText,
-                        ]}
-                      >
-                        {branch}
+                      <Ionicons
+                        name="calendar-outline"
+                        size={18}
+                        color="#38BDF8"
+                      />
+                      <Text style={styles.datePickerTriggerText}>
+                        {formatMonthYear(selectedDate)}
                       </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-
-              {/* CLICKABLE NATIVE DATE PICKER TRIGGER */}
-              <Text style={styles.filterLabel}>
-                Report Period (Month & Year)
-              </Text>
-              <TouchableOpacity
-                style={styles.datePickerTrigger}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <View
-                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-                >
-                  <Ionicons name="calendar-outline" size={18} color="#3B82F6" />
-                  <Text style={styles.datePickerTriggerText}>
-                    {formatMonthYear(selectedDate)}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#94A3B8" />
-              </TouchableOpacity>
-
-              {/* Native DateTimePicker Popup Component */}
-              {showDatePicker && (
-                <DateTimePicker
-                  value={selectedDate}
-                  mode="date"
-                  display="spinner" // Ya 'default' use kar sakte hain
-                  onChange={onDateChange}
-                />
-              )}
-
-              {/* Select Report Category */}
-              <Text style={styles.filterLabel}>Report Category</Text>
-              <TouchableOpacity
-                style={[
-                  styles.reportOptionCard,
-                  selectedReportType === "rent" && styles.selectedReportOption,
-                ]}
-                onPress={() => setSelectedReportType("rent")}
-              >
-                <Ionicons name="wallet" size={18} color="#F59E0B" />
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.reportOptTitle}>
-                    Rent Collection Report
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.reportOptionCard,
-                  selectedReportType === "expense" &&
-                    styles.selectedReportOption,
-                ]}
-                onPress={() => setSelectedReportType("expense")}
-              >
-                <Ionicons name="flash" size={18} color="#0EA5E9" />
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.reportOptTitle}>
-                    Utility & Expense Statement
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.reportOptionCard,
-                  selectedReportType === "tenants" &&
-                    styles.selectedReportOption,
-                ]}
-                onPress={() => setSelectedReportType("tenants")}
-              >
-                <Ionicons name="people" size={18} color="#10B981" />
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.reportOptTitle}>
-                    Active Tenants Directory
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* Download Button */}
-              <TouchableOpacity
-                style={styles.downloadBtn}
-                onPress={generateAndDownloadPDF}
-                disabled={isGenerating}
-              >
-                {isGenerating ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <>
+                    </View>
                     <Ionicons
-                      name="download-outline"
-                      size={18}
-                      color="#FFFFFF"
+                      name="chevron-forward"
+                      size={16}
+                      color="#94A3B8"
                     />
-                    <Text style={styles.downloadBtnText}>
-                      Download PDF Report
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </ScrollView>
+                  </TouchableOpacity>
+
+                  {/* Native DateTimePicker Popup Component */}
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={selectedDate}
+                      mode="date"
+                      display={Platform.OS === "ios" ? "spinner" : "default"}
+                      onChange={onDateChange}
+                    />
+                  )}
+
+                  {/* Select Report Category */}
+                  <Text style={styles.filterLabel}>REPORT CATEGORY</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.reportOptionCard,
+                      selectedReportType === "rent" &&
+                        styles.selectedReportOption,
+                    ]}
+                    onPress={() => setSelectedReportType("rent")}
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={[
+                        styles.iconBg,
+                        { backgroundColor: "rgba(245, 158, 11, 0.15)" },
+                      ]}
+                    >
+                      <Ionicons name="wallet" size={16} color="#F59E0B" />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={styles.reportOptTitle}>
+                        Rent Collection Report
+                      </Text>
+                      <Text style={styles.reportOptSub}>
+                        Overall paid & pending balances
+                      </Text>
+                    </View>
+                    {selectedReportType === "rent" && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={18}
+                        color="#F59E0B"
+                      />
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.reportOptionCard,
+                      selectedReportType === "expense" &&
+                        styles.selectedReportOption,
+                    ]}
+                    onPress={() => setSelectedReportType("expense")}
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={[
+                        styles.iconBg,
+                        { backgroundColor: "rgba(14, 165, 233, 0.15)" },
+                      ]}
+                    >
+                      <Ionicons name="flash" size={16} color="#0EA5E9" />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={styles.reportOptTitle}>
+                        Utility & Expense Statement
+                      </Text>
+                      <Text style={styles.reportOptSub}>
+                        Electricity, maintenance & bills
+                      </Text>
+                    </View>
+                    {selectedReportType === "expense" && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={18}
+                        color="#0EA5E9"
+                      />
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.reportOptionCard,
+                      selectedReportType === "tenants" &&
+                        styles.selectedReportOption,
+                    ]}
+                    onPress={() => setSelectedReportType("tenants")}
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={[
+                        styles.iconBg,
+                        { backgroundColor: "rgba(16, 185, 129, 0.15)" },
+                      ]}
+                    >
+                      <Ionicons name="people" size={16} color="#10B981" />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={styles.reportOptTitle}>
+                        Active Tenants Directory
+                      </Text>
+                      <Text style={styles.reportOptSub}>
+                        Occupancy details & contact directory
+                      </Text>
+                    </View>
+                    {selectedReportType === "tenants" && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={18}
+                        color="#10B981"
+                      />
+                    )}
+                  </TouchableOpacity>
+
+                  {/* Download Button */}
+                  <TouchableOpacity
+                    style={styles.downloadBtn}
+                    onPress={generateAndDownloadPDF}
+                    disabled={isGenerating}
+                    activeOpacity={0.85}
+                  >
+                    {isGenerating ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="download-outline"
+                          size={18}
+                          color="#FFFFFF"
+                        />
+                        <Text style={styles.downloadBtnText}>
+                          Download PDF Report
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </ScrollView>
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#0F172A" },
-  container: { flex: 1, paddingHorizontal: 20, paddingTop: 15 },
-  screenTitle: {
-    color: "#F8FAFC",
-    fontSize: 22,
-    fontWeight: "700",
-    marginBottom: 15,
-  },
-  profileCard: {
-    backgroundColor: "#1E293B",
-    borderRadius: 16,
-    padding: 20,
-    alignItems: "center",
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  avatar: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: "#2563EB",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: "#3B82F6",
-  },
-  avatarText: { color: "#FFFFFF", fontSize: 26, fontWeight: "bold" },
-  name: { color: "#FFFFFF", fontSize: 18, fontWeight: "700" },
-  role: { color: "#94A3B8", fontSize: 12, marginTop: 2 },
-  pg: { color: "#64748B", fontSize: 11, marginTop: 2 },
-  sectionHeading: {
-    color: "#64748B",
-    fontSize: 11,
-    fontWeight: "600",
-    marginBottom: 8,
-    marginTop: 10,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  menuItem: {
-    backgroundColor: "#1E293B",
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    marginBottom: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  logoutItem: {
-    backgroundColor: "rgba(239, 68, 68, 0.05)",
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    marginTop: 10,
-    marginBottom: 20,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.2)",
-  },
-  menuLeft: { flexDirection: "row", alignItems: "center" },
-  iconBg: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 10,
-  },
-  menuText: { color: "#F1F5F9", fontSize: 14, fontWeight: "500" },
-  logoutText: { color: "#EF4444", fontWeight: "600", fontSize: 14 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.85)",
-    justifyContent: "flex-end",
-  },
-  modalContainer: {
-    backgroundColor: "#1E293B",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "#334155",
-    maxHeight: "90%",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  modalTitle: { color: "#F8FAFC", fontSize: 18, fontWeight: "700" },
-  filterLabel: {
-    color: "#94A3B8",
-    fontSize: 12,
-    fontWeight: "600",
-    marginBottom: 6,
-    marginTop: 12,
-  },
-  dropdownSelector: {
-    backgroundColor: "#0F172A",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  dropdownSelectorText: { color: "#F8FAFC", fontSize: 13, fontWeight: "600" },
-  dropdownList: {
-    backgroundColor: "#0F172A",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#334155",
-    marginTop: 4,
-    overflow: "hidden",
-  },
-  dropdownItem: {
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#1E293B",
-  },
-  activeDropdownItem: { backgroundColor: "rgba(59, 130, 246, 0.15)" },
-  dropdownItemText: { color: "#94A3B8", fontSize: 13 },
-  activeDropdownItemText: { color: "#3B82F6", fontWeight: "700" },
-  datePickerTrigger: {
-    backgroundColor: "#0F172A",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  datePickerTriggerText: { color: "#F8FAFC", fontSize: 13, fontWeight: "600" },
-  reportOptionCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#0F172A",
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "#334155",
-    marginTop: 4,
-  },
-  selectedReportOption: {
-    borderColor: "#3B82F6",
-    backgroundColor: "rgba(25, 103, 228, 0.1)",
-  },
-  reportOptTitle: { color: "#F8FAFC", fontSize: 13, fontWeight: "600" },
-  downloadBtn: {
-    backgroundColor: "#2563EB",
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 14,
-    borderRadius: 12,
-    marginTop: 20,
-    gap: 8,
-  },
-  downloadBtnText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-});
