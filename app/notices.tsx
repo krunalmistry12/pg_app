@@ -7,10 +7,11 @@ import {
   ActivityIndicator,
   Alert,
   Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   SafeAreaView,
   ScrollView,
-  StyleSheet,
   Switch,
   Text,
   TextInput,
@@ -19,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { noticeService } from "../src/services/Notice/noticeService";
+import { createStyles } from "../src/styles/Admin/AdminNoticesStyles"; // Update this path to match your file structure
 
 interface NoticeItem {
   id: string;
@@ -38,8 +40,8 @@ interface PGBranch {
 export default function AdminNoticesScreen() {
   const router = useRouter();
 
-  // Yaha humne by default dark mode ko true set kar diya hai taaki Notice Board hamesha Dark Theme me khule
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
+  // Locked to dark mode by default
+  const [isDarkMode] = useState<boolean>(true);
   const styles = createStyles(isDarkMode);
 
   const [pgBranches, setPgBranches] = useState<PGBranch[]>([
@@ -371,18 +373,6 @@ export default function AdminNoticesScreen() {
         <Text style={styles.headerTitle}>Notice Board Manager</Text>
 
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          {/* Theme Toggle Button (Admin side se theme change karne ke liye option) */}
-          <TouchableOpacity
-            onPress={() => setIsDarkMode(!isDarkMode)}
-            style={{ padding: 6, marginRight: 4 }}
-          >
-            <Ionicons
-              name={isDarkMode ? "sunny" : "moon"}
-              size={20}
-              color={isDarkMode ? "#FBBF24" : "#4B5563"}
-            />
-          </TouchableOpacity>
-
           <TouchableOpacity
             onPress={handleOpenAddModal}
             style={styles.addButtonHeader}
@@ -704,400 +694,139 @@ export default function AdminNoticesScreen() {
       </ScrollView>
 
       {/* Broadcast / Edit Notice Modal */}
-      <Modal visible={modalVisible} animationType="fade" transparent={true}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalContent}>
-                <View style={styles.modalHeaderTop}>
-                  <Text style={styles.modalTitle}>
-                    {editingNoticeId ? "Edit Notice" : "Broadcast Notice"}
-                  </Text>
-                  <TouchableOpacity onPress={() => setModalVisible(false)}>
-                    <Ionicons
-                      name="close"
-                      size={22}
-                      color={isDarkMode ? "#94A3B8" : "#6B7280"}
-                    />
-                  </TouchableOpacity>
-                </View>
-
-                <Text style={styles.targetPgText}>
-                  Target Group:{" "}
-                  <Text style={{ fontWeight: "bold", color: "#06B6D4" }}>
-                    {editingNoticeId ? editingNoticeFlat.name : selectedPG.name}
-                  </Text>
-                </Text>
-
-                <Text style={styles.inputLabel}>Notice Title</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g., Water Supply Maintenance"
-                  placeholderTextColor={isDarkMode ? "#64748B" : "#9CA3AF"}
-                  value={title}
-                  onChangeText={setTitle}
-                  returnKeyType="done"
-                  onSubmitEditing={Keyboard.dismiss}
-                />
-
-                <Text style={styles.inputLabel}>Notice Message</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  placeholder="Write detailed message for tenants..."
-                  placeholderTextColor={isDarkMode ? "#64748B" : "#9CA3AF"}
-                  multiline
-                  numberOfLines={4}
-                  value={desc}
-                  onChangeText={setDesc}
-                  returnKeyType="done"
-                  blurOnSubmit={true}
-                  onSubmitEditing={Keyboard.dismiss}
-                />
-
-                <View style={styles.switchRow}>
-                  <View style={{ flex: 1, marginRight: 10 }}>
-                    <Text style={styles.switchLabel}>Mark as Urgent</Text>
-                    <Text style={styles.switchSub}>
-                      Highlights in red for tenants
-                    </Text>
-                  </View>
-                  <Switch
-                    trackColor={{
-                      false: isDarkMode ? "#334155" : "#D1D5DB",
-                      true: "#FCA5A5",
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalOverlay}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={{ width: "100%", justifyContent: "flex-end" }}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalContent}>
+                  {/* Pull Indicator Bar */}
+                  <View
+                    style={{
+                      width: 40,
+                      height: 4,
+                      borderRadius: 2,
+                      backgroundColor: isDarkMode ? "#374151" : "#CBD5E1",
+                      alignSelf: "center",
+                      marginBottom: 12,
                     }}
-                    thumbColor={isUrgent ? "#EF4444" : "#F4F3F4"}
-                    value={isUrgent}
-                    onValueChange={setIsUrgent}
                   />
-                </View>
 
-                {!editingNoticeId && (
-                  <View style={styles.switchRow}>
-                    <View style={{ flex: 1, marginRight: 10 }}>
-                      <Text style={styles.switchLabel}>
-                        Send WhatsApp Alert
-                      </Text>
-                      <Text style={styles.switchSub}>
-                        Instantly message all active tenants
-                      </Text>
-                    </View>
-                    <Switch
-                      trackColor={{
-                        false: isDarkMode ? "#334155" : "#D1D5DB",
-                        true: "#99F6E4",
-                      }}
-                      thumbColor={sendNotification ? "#06B6D4" : "#F4F3F4"}
-                      value={sendNotification}
-                      onValueChange={setSendNotification}
-                    />
+                  <View style={styles.modalHeaderTop}>
+                    <Text style={styles.modalTitle}>
+                      {editingNoticeId ? "Edit Notice" : "Broadcast Notice"}
+                    </Text>
+                    <TouchableOpacity onPress={() => setModalVisible(false)}>
+                      <Ionicons
+                        name="close"
+                        size={22}
+                        color={isDarkMode ? "#94A3B8" : "#6B7280"}
+                      />
+                    </TouchableOpacity>
                   </View>
-                )}
 
-                <TouchableOpacity
-                  style={styles.saveBtn}
-                  onPress={handleSaveNotice}
-                >
-                  <Text style={styles.saveBtnText}>
-                    {editingNoticeId ? "Update Notice" : "Publish & Broadcast"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    bounces={false}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    <Text style={styles.targetPgText}>
+                      Target Group:{" "}
+                      <Text style={{ fontWeight: "bold", color: "#06B6D4" }}>
+                        {editingNoticeId
+                          ? editingNoticeFlat.name
+                          : selectedPG.name}
+                      </Text>
+                    </Text>
+
+                    <Text style={styles.inputLabel}>Notice Title</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="e.g., Water Supply Maintenance"
+                      placeholderTextColor={isDarkMode ? "#64748B" : "#9CA3AF"}
+                      value={title}
+                      onChangeText={setTitle}
+                      returnKeyType="done"
+                    />
+
+                    <Text style={styles.inputLabel}>Notice Message</Text>
+                    <TextInput
+                      style={[styles.input, styles.textArea]}
+                      placeholder="Write detailed message for tenants..."
+                      placeholderTextColor={isDarkMode ? "#64748B" : "#9CA3AF"}
+                      multiline
+                      numberOfLines={4}
+                      value={desc}
+                      onChangeText={setDesc}
+                      returnKeyType="done"
+                      blurOnSubmit={true}
+                    />
+
+                    <View style={styles.switchRow}>
+                      <View style={{ flex: 1, marginRight: 10 }}>
+                        <Text style={styles.switchLabel}>Mark as Urgent</Text>
+                        <Text style={styles.switchSub}>
+                          Highlights in red for tenants
+                        </Text>
+                      </View>
+                      <Switch
+                        trackColor={{
+                          false: isDarkMode ? "#334155" : "#D1D5DB",
+                          true: "#FCA5A5",
+                        }}
+                        thumbColor={isUrgent ? "#EF4444" : "#F4F3F4"}
+                        value={isUrgent}
+                        onValueChange={setIsUrgent}
+                      />
+                    </View>
+
+                    {!editingNoticeId && (
+                      <View style={styles.switchRow}>
+                        <View style={{ flex: 1, marginRight: 10 }}>
+                          <Text style={styles.switchLabel}>
+                            Send WhatsApp Alert
+                          </Text>
+                          <Text style={styles.switchSub}>
+                            Instantly message all active tenants
+                          </Text>
+                        </View>
+                        <Switch
+                          trackColor={{
+                            false: isDarkMode ? "#334155" : "#D1D5DB",
+                            true: "#99F6E4",
+                          }}
+                          thumbColor={sendNotification ? "#06B6D4" : "#F4F3F4"}
+                          value={sendNotification}
+                          onValueChange={setSendNotification}
+                        />
+                      </View>
+                    )}
+
+                    <TouchableOpacity
+                      style={styles.saveBtn}
+                      onPress={handleSaveNotice}
+                    >
+                      <Text style={styles.saveBtnText}>
+                        {editingNoticeId
+                          ? "Update Notice"
+                          : "Publish & Broadcast"}
+                      </Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
 }
-
-const createStyles = (isDarkMode: boolean) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: isDarkMode ? "#0B0F19" : "#F8FAFC",
-    },
-    header: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      backgroundColor: isDarkMode ? "#111827" : "#FFFFFF",
-      borderBottomWidth: 1,
-      borderBottomColor: isDarkMode ? "#1F2937" : "#E2E8F0",
-    },
-    backButton: {
-      padding: 6,
-    },
-    headerTitle: {
-      fontSize: 18,
-      fontWeight: "700",
-      color: isDarkMode ? "#F9FAFB" : "#1E293B",
-    },
-    addButtonHeader: {
-      backgroundColor: "#06B6D4",
-      padding: 8,
-      borderRadius: 8,
-      marginLeft: 4,
-    },
-    pgBarContainer: {
-      paddingVertical: 10,
-      backgroundColor: isDarkMode ? "#111827" : "#FFFFFF",
-      borderBottomWidth: 1,
-      borderBottomColor: isDarkMode ? "#1F2937" : "#E2E8F0",
-    },
-    scrollRow: {
-      paddingHorizontal: 16,
-      alignItems: "center",
-    },
-    pgChip: {
-      flexDirection: "row",
-      alignItems: "center",
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 20,
-      backgroundColor: isDarkMode ? "#1F2937" : "#F1F5F9",
-      marginRight: 8,
-      borderWidth: 1,
-      borderColor: isDarkMode ? "#374151" : "#E2E8F0",
-    },
-    commonChip: {
-      borderStyle: "dashed",
-    },
-    pgChipActive: {
-      backgroundColor: "#06B6D4",
-      borderColor: "#06B6D4",
-    },
-    pgChipText: {
-      fontSize: 13,
-      fontWeight: "600",
-      color: isDarkMode ? "#CBD5E1" : "#4B5563",
-    },
-    pgChipTextActive: {
-      color: "#FFFFFF",
-    },
-    tabContainer: {
-      flexDirection: "row",
-      padding: 12,
-      backgroundColor: isDarkMode ? "#0B0F19" : "#F8FAFC",
-    },
-    tabButton: {
-      flex: 1,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      paddingVertical: 10,
-      borderRadius: 10,
-      backgroundColor: isDarkMode ? "#111827" : "#FFFFFF",
-      marginHorizontal: 4,
-      borderWidth: 1,
-      borderColor: isDarkMode ? "#1F2937" : "#E2E8F0",
-    },
-    activeTabButton: {
-      borderColor: "#06B6D4",
-      backgroundColor: isDarkMode
-        ? "rgba(6, 182, 212, 0.1)"
-        : "rgba(6, 182, 212, 0.05)",
-    },
-    tabText: {
-      fontSize: 12,
-      fontWeight: "600",
-      color: isDarkMode ? "#64748B" : "#6B7280",
-    },
-    activeTabText: {
-      color: "#06B6D4",
-      fontWeight: "700",
-    },
-    scrollContent: {
-      padding: 16,
-      paddingBottom: 40,
-    },
-    banner: {
-      backgroundColor: isDarkMode ? "#111827" : "#FFFFFF",
-      borderRadius: 14,
-      padding: 16,
-      alignItems: "center",
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: isDarkMode ? "#1F2937" : "#E2E8F0",
-    },
-    commonBanner: {
-      borderColor: "rgba(6, 182, 212, 0.4)",
-    },
-    bannerLabel: {
-      fontSize: 15,
-      fontWeight: "700",
-      color: isDarkMode ? "#F9FAFB" : "#1E293B",
-      marginTop: 4,
-    },
-    bannerSubLabel: {
-      fontSize: 12,
-      color: isDarkMode ? "#94A3B8" : "#64748B",
-      marginTop: 2,
-    },
-    emptyContainer: {
-      alignItems: "center",
-      justifyContent: "center",
-      marginTop: 40,
-      padding: 20,
-    },
-    emptyText: {
-      textAlign: "center",
-      marginTop: 10,
-      fontSize: 14,
-      color: isDarkMode ? "#64748B" : "#9CA3AF",
-    },
-    card: {
-      backgroundColor: isDarkMode ? "#111827" : "#FFFFFF",
-      borderRadius: 14,
-      padding: 16,
-      marginBottom: 14,
-      borderWidth: 1,
-      borderColor: isDarkMode ? "#1F2937" : "#E2E8F0",
-    },
-    urgentCard: {
-      borderColor: "#EF4444",
-      backgroundColor: isDarkMode
-        ? "rgba(239, 68, 68, 0.05)"
-        : "rgba(239, 68, 68, 0.02)",
-    },
-    archiveCard: {
-      opacity: 0.85,
-    },
-    cardHeaderTop: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "flex-start",
-      marginBottom: 10,
-    },
-    titleRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      flex: 1,
-      marginRight: 8,
-    },
-    iconContainer: {
-      width: 36,
-      height: 36,
-      borderRadius: 8,
-      backgroundColor: isDarkMode
-        ? "rgba(6, 182, 212, 0.1)"
-        : "rgba(6, 182, 212, 0.08)",
-      justifyContent: "center",
-      alignItems: "center",
-      marginRight: 10,
-    },
-    urgentIconContainer: {
-      backgroundColor: "rgba(239, 68, 68, 0.1)",
-    },
-    archiveIconContainer: {
-      backgroundColor: isDarkMode ? "#1F2937" : "#F1F5F9",
-    },
-    noticeTitle: {
-      fontSize: 15,
-      fontWeight: "700",
-      color: isDarkMode ? "#F9FAFB" : "#1E293B",
-    },
-    noticeCategory: {
-      fontSize: 11,
-      color: isDarkMode ? "#94A3B8" : "#64748B",
-      marginTop: 2,
-    },
-    urgentBadge: {
-      backgroundColor: "#EF4444",
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-      borderRadius: 4,
-    },
-    urgentText: {
-      color: "#FFFFFF",
-      fontSize: 9,
-      fontWeight: "bold",
-    },
-    noticeDesc: {
-      fontSize: 13,
-      color: isDarkMode ? "#CBD5E1" : "#4B5563",
-      lineHeight: 18,
-    },
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: "rgba(0, 0, 0, 0.6)",
-      justifyContent: "flex-end",
-    },
-    modalContent: {
-      backgroundColor: isDarkMode ? "#111827" : "#FFFFFF",
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      padding: 20,
-      maxHeight: "90%",
-      borderWidth: 1,
-      borderColor: isDarkMode ? "#1F2937" : "#E2E8F0",
-    },
-    modalHeaderTop: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: 10,
-    },
-    modalTitle: {
-      fontSize: 18,
-      fontWeight: "700",
-      color: isDarkMode ? "#F9FAFB" : "#1E293B",
-    },
-    targetPgText: {
-      fontSize: 12,
-      color: isDarkMode ? "#94A3B8" : "#64748B",
-      marginBottom: 16,
-    },
-    inputLabel: {
-      fontSize: 12,
-      fontWeight: "600",
-      color: isDarkMode ? "#CBD5E1" : "#4B5563",
-      marginBottom: 6,
-      marginTop: 10,
-    },
-    input: {
-      backgroundColor: isDarkMode ? "#1F2937" : "#F8FAFC",
-      borderWidth: 1,
-      borderColor: isDarkMode ? "#374151" : "#E2E8F0",
-      borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      fontSize: 14,
-      color: isDarkMode ? "#F9FAFB" : "#1E293B",
-    },
-    textArea: {
-      height: 90,
-      textAlignVertical: "top",
-    },
-    switchRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      marginTop: 16,
-      paddingVertical: 4,
-    },
-    switchLabel: {
-      fontSize: 13,
-      fontWeight: "600",
-      color: isDarkMode ? "#F9FAFB" : "#1E293B",
-    },
-    switchSub: {
-      fontSize: 11,
-      color: isDarkMode ? "#94A3B8" : "#64748B",
-    },
-    saveBtn: {
-      backgroundColor: "#06B6D4",
-      borderRadius: 10,
-      paddingVertical: 14,
-      alignItems: "center",
-      marginTop: 24,
-      marginBottom: 10,
-    },
-    saveBtnText: {
-      color: "#FFFFFF",
-      fontSize: 15,
-      fontWeight: "700",
-    },
-  });

@@ -25,35 +25,41 @@ import { ReportFormatter } from "../../src/utils/ReportBuilder";
 interface AdminProfileData {
   name: string;
   email: string;
+  phone: string;
   role: string;
   pgName: string;
   location: string;
   branches: string[];
+  subscriptionPlan?: string;
+  subscriptionExpiry?: string;
 }
 
 const STORAGE_KEY = "@dashboard_cache_data";
 
 export default function Profile() {
   const [isReportModalVisible, setIsReportModalVisible] = useState(false);
+  const [isSubModalVisible, setIsSubModalVisible] = useState(false);
+  const [isSupportModalVisible, setIsSupportModalVisible] = useState(false);
+
   const [selectedReportType, setSelectedReportType] = useState<
     "rent" | "expense" | "tenants"
   >("rent");
 
-  // Initial state
   const [adminProfile, setAdminProfile] = useState<AdminProfileData>({
     name: "Loading...",
     email: "",
+    phone: "",
     role: "PG Administrator",
     pgName: "My PG Property",
     location: "Fetching location...",
     branches: ["Main Branch"],
+    subscriptionPlan: "Pro Business Plan",
+    subscriptionExpiry: "Dec 31, 2026",
   });
 
-  // Selection States
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState("Main Branch");
-
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -64,10 +70,7 @@ export default function Profile() {
   const fetchCurrentLocationArea = async (): Promise<string> => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        console.log("Location permission denied");
-        return "Ahmedabad"; // Fallback location
-      }
+      if (status !== "granted") return "Ahmedabad";
 
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
@@ -79,9 +82,9 @@ export default function Profile() {
       });
 
       if (reverseGeocode && reverseGeocode.length > 0) {
-        const address = reverseGeocode[0];
-        const area = address.district || address.city || "Ahmedabad";
-        return area;
+        return (
+          reverseGeocode[0].district || reverseGeocode[0].city || "Ahmedabad"
+        );
       }
     } catch (error) {
       console.log("Error fetching location:", error);
@@ -91,28 +94,24 @@ export default function Profile() {
 
   const loadAdminDetails = async () => {
     try {
-      console.log(
-        `Attempting to load admin profile from AsyncStorage using key: ${STORAGE_KEY}`,
-      );
       const storedData = await AsyncStorage.getItem(STORAGE_KEY);
-
-      // Fetch dynamic location area
       const currentArea = await fetchCurrentLocationArea();
 
       if (storedData) {
         const parsed = JSON.parse(storedData);
-        console.log("Admin profile successfully loaded from cache:", parsed);
-
         const mappedProfile: AdminProfileData = {
           name: parsed.ownerName || "Administrator",
-          email: parsed.email || "",
+          email: parsed.email || "admin@pgproperty.com",
+          phone: parsed.phone || "+91 9876543210",
           role: "PG Owner & Administrator",
           pgName: parsed.pgName || "My PG Property",
           location: parsed.location || currentArea,
           branches:
-            parsed.branches && parsed.branches.length > 0
+            parsed.branches?.length > 0
               ? parsed.branches
-              : ["Main Branch"],
+              : ["Main Branch", "Branch 2"],
+          subscriptionPlan: parsed.subscriptionPlan || "Pro Business Plan",
+          subscriptionExpiry: parsed.subscriptionExpiry || "Dec 31, 2026",
         };
 
         setAdminProfile(mappedProfile);
@@ -120,27 +119,24 @@ export default function Profile() {
           setSelectedBranch(mappedProfile.branches[0]);
         }
       } else {
-        console.log(
-          `Log: Cannot show user detail - No data found in AsyncStorage for key: ${STORAGE_KEY}`,
-        );
-
         const freshData: AdminProfileData = {
           name: "Administrator",
-          email: "",
+          email: "admin@pgproperty.com",
+          phone: "+91 9876543210",
           role: "PG Owner & Administrator",
           pgName: "My PG Property",
           location: currentArea,
           branches: ["Main Branch"],
+          subscriptionPlan: "Pro Business Plan",
+          subscriptionExpiry: "Dec 31, 2026",
         };
 
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(freshData));
         setAdminProfile(freshData);
-        if (freshData.branches.length > 0) {
-          setSelectedBranch(freshData.branches[0]);
-        }
+        setSelectedBranch("Main Branch");
       }
     } catch (e) {
-      console.log("Error loading/saving admin profile from storage:", e);
+      console.log("Error loading profile:", e);
     }
   };
 
@@ -149,12 +145,8 @@ export default function Profile() {
   };
 
   const onDateChange = (event: any, date?: Date) => {
-    if (Platform.OS === "android") {
-      setShowDatePicker(false);
-    }
-    if (date) {
-      setSelectedDate(date);
-    }
+    if (Platform.OS === "android") setShowDatePicker(false);
+    if (date) setSelectedDate(date);
   };
 
   const logout = async () => {
@@ -181,7 +173,6 @@ export default function Profile() {
     setIsGenerating(true);
 
     try {
-      console.log("Generating HTML content...");
       const htmlContent = ReportFormatter.generateHTML({
         branch: selectedBranch,
         month: formatMonthYear(selectedDate),
@@ -189,35 +180,25 @@ export default function Profile() {
         reportType: selectedReportType,
       });
 
-      console.log("Calling Print.printToFileAsync...");
       const file = await Print.printToFileAsync({ html: htmlContent });
-      console.log("Print result file:", file);
-
-      if (!file || !file.uri) {
-        throw new Error("PDF generation returned an invalid URI.");
-      }
+      if (!file?.uri) throw new Error("Invalid URI");
 
       setIsGenerating(false);
 
-      const isSharingAvailable = await Sharing.isAvailableAsync();
-      if (isSharingAvailable) {
+      if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(file.uri, {
           mimeType: "application/pdf",
           dialogTitle: "Save or Share Report PDF",
           UTI: "com.adobe.pdf",
         });
       } else {
-        Alert.alert("Success", `PDF created successfully at: ${file.uri}`);
+        Alert.alert("Success", `PDF created at: ${file.uri}`);
       }
 
       setIsReportModalVisible(false);
     } catch (error: any) {
       setIsGenerating(false);
-      console.error("PDF Generation Detailed Error:", error);
-      Alert.alert(
-        "PDF Error",
-        `Failed: ${error?.message || "Unknown error"}. Check console logs.`,
-      );
+      Alert.alert("PDF Error", `Failed: ${error?.message || "Unknown error"}`);
     }
   };
 
@@ -229,50 +210,115 @@ export default function Profile() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
       >
-        <Text style={styles.screenTitle}>Admin Dashboard</Text>
+        {/* Simple Header */}
+        <View
+          style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10 }}
+        >
+          <Text style={styles.screenTitle}>Admin Profile</Text>
+        </View>
 
-        {/* Dynamic Profile Card */}
+        {/* Clean User Details Card */}
         <View style={styles.profileCard}>
-          <View style={styles.avatarGlowContainer}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {adminProfile.name && adminProfile.name !== "Loading..."
-                  ? adminProfile.name.charAt(0).toUpperCase()
-                  : "A"}
-              </Text>
-            </View>
+          <View style={styles.avatar}>
+            <Ionicons name="person" size={28} color="#38BDF8" />
           </View>
           <Text style={styles.name}>{adminProfile.name}</Text>
           <Text style={styles.role}>{adminProfile.role}</Text>
+
           <View style={styles.pgBadge}>
             <Ionicons name="business-outline" size={12} color="#38BDF8" />
             <Text style={styles.pgBadgeText}>
               {adminProfile.pgName} • {adminProfile.location}
             </Text>
           </View>
+
+          <View
+            style={[
+              styles.pgBadge,
+              {
+                marginTop: 6,
+                backgroundColor: "rgba(16, 185, 129, 0.1)",
+                borderColor: "rgba(16, 185, 129, 0.2)",
+              },
+            ]}
+          >
+            <Ionicons name="call-outline" size={12} color="#10B981" />
+            <Text style={[styles.pgBadgeText, { color: "#10B981" }]}>
+              {adminProfile.phone}
+            </Text>
+          </View>
         </View>
 
-        {/* Core Directory */}
-        <Text style={styles.sectionHeading}>Core Directory</Text>
+        {/* Subscription Simple Banner */}
+        <View
+          style={{
+            marginHorizontal: 16,
+            marginBottom: 20,
+            backgroundColor: "#1E293B",
+            borderRadius: 14,
+            padding: 16,
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+            borderWidth: 1,
+            borderColor: "rgba(56, 189, 248, 0.2)",
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Ionicons name="ribbon" size={20} color="#38BDF8" />
+            <View>
+              <Text
+                style={{
+                  color: "#94A3B8",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                }}
+              >
+                Subscription
+              </Text>
+              <Text
+                style={{ color: "#F8FAFC", fontSize: 14, fontWeight: "bold" }}
+              >
+                {adminProfile.subscriptionPlan}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={{
+              backgroundColor: "#38BDF8",
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 8,
+            }}
+            onPress={() => setIsSubModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={{ color: "#0F172A", fontWeight: "bold", fontSize: 12 }}
+            >
+              Manage
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Business Controls */}
+        <Text style={styles.sectionHeading}>Management</Text>
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => router.push("/tenants" as any)}
+          onPress={() =>
+            handleActionAlert("Edit Profile", "Edit profile screen opened.")
+          }
           activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
-            <View
-              style={[
-                styles.iconBg,
-                { backgroundColor: "rgba(16, 185, 129, 0.12)" },
-              ]}
-            >
-              <Ionicons name="people-outline" size={18} color="#10B981" />
+            <View style={styles.iconBg}>
+              <Ionicons name="create" size={16} color="#38BDF8" />
             </View>
             <View>
-              <Text style={styles.menuText}>Tenants Directory</Text>
+              <Text style={styles.menuText}>Edit Profile</Text>
               <Text style={styles.menuSubText}>
-                Manage active residents & rooms
+                Update your personal details & phone
               </Text>
             </View>
           </View>
@@ -281,48 +327,12 @@ export default function Profile() {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => router.push("/rent" as any)}
+          onPress={() => router.push("/reports")}
           activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
-            <View
-              style={[
-                styles.iconBg,
-                { backgroundColor: "rgba(245, 158, 11, 0.12)" },
-              ]}
-            >
-              <Ionicons name="wallet-outline" size={18} color="#F59E0B" />
-            </View>
-            <View>
-              <Text style={styles.menuText}>Rent & Ledger Records</Text>
-              <Text style={styles.menuSubText}>
-                Track dues, collections & receipts
-              </Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color="#64748B" />
-        </TouchableOpacity>
-
-        {/* Advanced Admin Controls */}
-        <Text style={styles.sectionHeading}>Advanced Admin Controls</Text>
-
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => setIsReportModalVisible(true)}
-          activeOpacity={0.8}
-        >
-          <View style={styles.menuLeft}>
-            <View
-              style={[
-                styles.iconBg,
-                { backgroundColor: "rgba(14, 165, 233, 0.12)" },
-              ]}
-            >
-              <Ionicons
-                name="document-text-outline"
-                size={18}
-                color="#0EA5E9"
-              />
+            <View style={styles.iconBg}>
+              <Ionicons name="document-text" size={16} color="#0EA5E9" />
             </View>
             <View>
               <Text style={styles.menuText}>Export Custom Report (PDF)</Text>
@@ -338,6 +348,28 @@ export default function Profile() {
           style={styles.menuItem}
           onPress={() =>
             handleActionAlert(
+              "Staff Access",
+              "Warden & Manager permissions panel opened.",
+            )
+          }
+          activeOpacity={0.8}
+        >
+          <View style={styles.menuLeft}>
+            <View style={styles.iconBg}>
+              <Ionicons name="shield-checkmark" size={16} color="#10B981" />
+            </View>
+            <View>
+              <Text style={styles.menuText}>Staff & Warden Management</Text>
+              <Text style={styles.menuSubText}>Assign sub-admin rights</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color="#64748B" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() =>
+            handleActionAlert(
               "Notice Board",
               "Broadcast panel opened successfully.",
             )
@@ -345,13 +377,8 @@ export default function Profile() {
           activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
-            <View
-              style={[
-                styles.iconBg,
-                { backgroundColor: "rgba(236, 72, 153, 0.12)" },
-              ]}
-            >
-              <Ionicons name="megaphone-outline" size={18} color="#EC4899" />
+            <View style={styles.iconBg}>
+              <Ionicons name="megaphone" size={16} color="#EC4899" />
             </View>
             <View>
               <Text style={styles.menuText}>Broadcast Notice Board</Text>
@@ -363,39 +390,53 @@ export default function Profile() {
           <Ionicons name="chevron-forward" size={16} color="#64748B" />
         </TouchableOpacity>
 
-        {/* Preferences */}
+        {/* Preferences & Support */}
         <Text style={styles.sectionHeading}>Preferences</Text>
 
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() =>
             handleActionAlert(
-              "App Settings",
-              "Settings configuration is up to date.",
+              "Security Lock",
+              "App Biometric/PIN lock is active.",
             )
           }
           activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
-            <View
-              style={[
-                styles.iconBg,
-                { backgroundColor: "rgba(100, 116, 139, 0.12)" },
-              ]}
-            >
-              <Ionicons name="settings-outline" size={18} color="#94A3B8" />
+            <View style={styles.iconBg}>
+              <Ionicons name="lock-closed" size={16} color="#F59E0B" />
             </View>
             <View>
-              <Text style={styles.menuText}>App Settings</Text>
+              <Text style={styles.menuText}>App Security & PIN Lock</Text>
               <Text style={styles.menuSubText}>
-                Preferences & configurations
+                Biometric & passcode settings
               </Text>
             </View>
           </View>
           <Ionicons name="chevron-forward" size={16} color="#64748B" />
         </TouchableOpacity>
 
-        {/* Logout Option */}
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => setIsSupportModalVisible(true)}
+          activeOpacity={0.8}
+        >
+          <View style={styles.menuLeft}>
+            <View style={styles.iconBg}>
+              <Ionicons name="help-circle" size={16} color="#8B5CF6" />
+            </View>
+            <View>
+              <Text style={styles.menuText}>Help & WhatsApp Support</Text>
+              <Text style={styles.menuSubText}>
+                Get assistance or raise a ticket
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color="#64748B" />
+        </TouchableOpacity>
+
+        {/* Logout */}
         <TouchableOpacity
           onPress={logout}
           style={styles.logoutItem}
@@ -405,10 +446,10 @@ export default function Profile() {
             <View
               style={[
                 styles.iconBg,
-                { backgroundColor: "rgba(239, 68, 68, 0.12)" },
+                { backgroundColor: "rgba(239, 68, 68, 0.15)" },
               ]}
             >
-              <Ionicons name="log-out-outline" size={18} color="#EF4444" />
+              <Ionicons name="log-out" size={16} color="#EF4444" />
             </View>
             <Text style={styles.logoutText}>Logout Account</Text>
           </View>
@@ -416,7 +457,113 @@ export default function Profile() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Main Report Filter Modal */}
+      {/* Subscription Modal */}
+      <Modal
+        visible={isSubModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsSubModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setIsSubModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContainer, { padding: 24 }]}>
+                <Text style={[styles.modalTitle, { marginBottom: 15 }]}>
+                  Subscription Details
+                </Text>
+                <Text
+                  style={{ color: "#94A3B8", fontSize: 14, marginBottom: 8 }}
+                >
+                  Active Plan:{" "}
+                  <Text style={{ color: "#38BDF8", fontWeight: "bold" }}>
+                    {adminProfile.subscriptionPlan}
+                  </Text>
+                </Text>
+                <Text
+                  style={{ color: "#94A3B8", fontSize: 14, marginBottom: 20 }}
+                >
+                  Valid Till:{" "}
+                  <Text style={{ color: "#10B981", fontWeight: "bold" }}>
+                    {adminProfile.subscriptionExpiry}
+                  </Text>
+                </Text>
+
+                <TouchableOpacity
+                  style={[
+                    styles.downloadBtn,
+                    { backgroundColor: "#38BDF8", marginTop: 10 },
+                  ]}
+                  onPress={() => {
+                    setIsSubModalVisible(false);
+                    Alert.alert("Upgrade", "Redirecting to payment gateway...");
+                  }}
+                >
+                  <Text style={[styles.downloadBtnText, { color: "#0F172A" }]}>
+                    Renew / Upgrade Plan
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Support Modal */}
+      <Modal
+        visible={isSupportModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsSupportModalVisible(false)}
+      >
+        <TouchableWithoutFeedback
+          onPress={() => setIsSupportModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContainer, { padding: 24 }]}>
+                <Text style={[styles.modalTitle, { marginBottom: 15 }]}>
+                  Help & Support
+                </Text>
+                <Text
+                  style={{
+                    color: "#94A3B8",
+                    fontSize: 14,
+                    lineHeight: 22,
+                    marginBottom: 20,
+                  }}
+                >
+                  Need assistance with your PG property setup or payment
+                  integration? Reach out to our technical team directly.
+                </Text>
+
+                <TouchableOpacity
+                  style={[
+                    styles.downloadBtn,
+                    { backgroundColor: "#10B981", marginBottom: 12 },
+                  ]}
+                  onPress={() => {
+                    setIsSupportModalVisible(false);
+                    handleActionAlert(
+                      "WhatsApp Support",
+                      "Connecting to support line...",
+                    );
+                  }}
+                >
+                  <Ionicons
+                    name="logo-whatsapp"
+                    size={18}
+                    color="#FFFFFF"
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={styles.downloadBtnText}>Chat on WhatsApp</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Report Modal */}
       <Modal
         visible={isReportModalVisible}
         animationType="slide"
@@ -429,29 +576,12 @@ export default function Profile() {
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.modalContainer}>
-                {/* Drag Handle Bar */}
-                <View style={{ alignItems: "center", marginBottom: 8 }}>
-                  <View
-                    style={{
-                      width: 40,
-                      height: 4,
-                      borderRadius: 2,
-                      backgroundColor: "rgba(255, 255, 255, 0.2)",
-                    }}
-                  />
-                </View>
-
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>
                     Download Filtered Report
                   </Text>
                   <TouchableOpacity
                     onPress={() => setIsReportModalVisible(false)}
-                    style={{
-                      backgroundColor: "rgba(255, 255, 255, 0.08)",
-                      borderRadius: 16,
-                      padding: 5,
-                    }}
                   >
                     <Ionicons name="close" size={18} color="#94A3B8" />
                   </TouchableOpacity>
@@ -461,7 +591,6 @@ export default function Profile() {
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={{ paddingBottom: 25 }}
                 >
-                  {/* Select PG Branch Dropdown */}
                   <Text style={styles.filterLabel}>
                     SELECT PROPERTY / BRANCH
                   </Text>
@@ -470,7 +599,6 @@ export default function Profile() {
                     onPress={() =>
                       setIsBranchDropdownOpen(!isBranchDropdownOpen)
                     }
-                    activeOpacity={0.8}
                   >
                     <Text style={styles.dropdownSelectorText}>
                       {selectedBranch}
@@ -513,14 +641,12 @@ export default function Profile() {
                     </View>
                   )}
 
-                  {/* CLICKABLE NATIVE DATE PICKER TRIGGER */}
                   <Text style={styles.filterLabel}>
                     REPORT PERIOD (MONTH & YEAR)
                   </Text>
                   <TouchableOpacity
                     style={styles.datePickerTrigger}
                     onPress={() => setShowDatePicker(true)}
-                    activeOpacity={0.8}
                   >
                     <View
                       style={{
@@ -545,7 +671,6 @@ export default function Profile() {
                     />
                   </TouchableOpacity>
 
-                  {/* Native DateTimePicker Popup Component */}
                   {showDatePicker && (
                     <DateTimePicker
                       value={selectedDate}
@@ -555,7 +680,6 @@ export default function Profile() {
                     />
                   )}
 
-                  {/* Select Report Category */}
                   <Text style={styles.filterLabel}>REPORT CATEGORY</Text>
                   <TouchableOpacity
                     style={[
@@ -564,14 +688,8 @@ export default function Profile() {
                         styles.selectedReportOption,
                     ]}
                     onPress={() => setSelectedReportType("rent")}
-                    activeOpacity={0.8}
                   >
-                    <View
-                      style={[
-                        styles.iconBg,
-                        { backgroundColor: "rgba(245, 158, 11, 0.15)" },
-                      ]}
-                    >
+                    <View style={styles.iconBg}>
                       <Ionicons name="wallet" size={16} color="#F59E0B" />
                     </View>
                     <View style={{ flex: 1, marginLeft: 10 }}>
@@ -598,14 +716,8 @@ export default function Profile() {
                         styles.selectedReportOption,
                     ]}
                     onPress={() => setSelectedReportType("expense")}
-                    activeOpacity={0.8}
                   >
-                    <View
-                      style={[
-                        styles.iconBg,
-                        { backgroundColor: "rgba(14, 165, 233, 0.15)" },
-                      ]}
-                    >
+                    <View style={styles.iconBg}>
                       <Ionicons name="flash" size={16} color="#0EA5E9" />
                     </View>
                     <View style={{ flex: 1, marginLeft: 10 }}>
@@ -632,14 +744,8 @@ export default function Profile() {
                         styles.selectedReportOption,
                     ]}
                     onPress={() => setSelectedReportType("tenants")}
-                    activeOpacity={0.8}
                   >
-                    <View
-                      style={[
-                        styles.iconBg,
-                        { backgroundColor: "rgba(16, 185, 129, 0.15)" },
-                      ]}
-                    >
+                    <View style={styles.iconBg}>
                       <Ionicons name="people" size={16} color="#10B981" />
                     </View>
                     <View style={{ flex: 1, marginLeft: 10 }}>
@@ -659,12 +765,10 @@ export default function Profile() {
                     )}
                   </TouchableOpacity>
 
-                  {/* Download Button */}
                   <TouchableOpacity
                     style={styles.downloadBtn}
                     onPress={generateAndDownloadPDF}
                     disabled={isGenerating}
-                    activeOpacity={0.85}
                   >
                     {isGenerating ? (
                       <ActivityIndicator color="#FFFFFF" size="small" />
