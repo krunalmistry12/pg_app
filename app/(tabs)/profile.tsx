@@ -173,27 +173,9 @@ export default function Profile() {
     setIsGenerating(true);
 
     try {
-      const htmlContent = ReportFormatter.generateHTML({
-        branch: selectedBranch,
-        month: formatMonthYear(selectedDate),
-        generatedBy: `${adminProfile.name} (Admin)`,
-        reportType: selectedReportType,
-      });
-
-      const file = await Print.printToFileAsync({ html: htmlContent });
-      if (!file?.uri) throw new Error("Invalid URI");
+   
 
       setIsGenerating(false);
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(file.uri, {
-          mimeType: "application/pdf",
-          dialogTitle: "Save or Share Report PDF",
-          UTI: "com.adobe.pdf",
-        });
-      } else {
-        Alert.alert("Success", `PDF created at: ${file.uri}`);
-      }
 
       setIsReportModalVisible(false);
     } catch (error: any) {

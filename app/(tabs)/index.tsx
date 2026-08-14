@@ -380,7 +380,7 @@ export default function Dashboard() {
         <View style={styles.statsContainer}>
           <TouchableOpacity
             style={styles.card}
-            onPress={() => router.push("/flat-manager" as any)}
+            onPress={() => router.push("/rooms" as any)}
           >
             <View style={styles.cardHeader}>
               <View style={styles.iconBoxBlue}>

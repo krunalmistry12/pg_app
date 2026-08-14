@@ -20,7 +20,7 @@ import {
   View,
 } from "react-native";
 import { noticeService } from "../src/services/Notice/noticeService";
-import { createStyles } from "../src/styles/Admin/AdminNoticesStyles"; // Update this path to match your file structure
+import { createStyles } from "../src/styles/Admin/AdminNoticesStyles";
 
 interface NoticeItem {
   id: string;
@@ -40,7 +40,6 @@ interface PGBranch {
 export default function AdminNoticesScreen() {
   const router = useRouter();
 
-  // Locked to dark mode by default
   const [isDarkMode] = useState<boolean>(true);
   const styles = createStyles(isDarkMode);
 
@@ -306,14 +305,19 @@ export default function AdminNoticesScreen() {
         ? editingNoticeFlat.id
         : selectedPG.id;
 
-      const payload = {
+      const payload: any = {
         title: title.trim(),
         description: desc.trim(),
-        flatId: targetFlatId,
         isUrgent: isUrgent,
         sendNotification: sendNotification,
         createdByAdminId: storedUserId,
       };
+
+      if (targetFlatId) {
+        payload.flatId = targetFlatId;
+      } else {
+        payload.flatId = null;
+      }
 
       let response;
       if (editingNoticeId) {
@@ -357,8 +361,32 @@ export default function AdminNoticesScreen() {
     }
   };
 
-  const todayNotices = notices.filter((item) => item.date === "Today");
-  const previousNotices = notices.filter((item) => item.date !== "Today");
+  // Helper function to format today's date in "15 Aug 2026" style
+  const getFormattedCurrentDate = () => {
+    const date = new Date();
+    const options: Intl.DateTimeFormatOptions = {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    };
+    return date.toLocaleDateString("en-GB", options); // Returns format like "15 Aug 2026"
+  };
+
+  const currentDateStr = getFormattedCurrentDate();
+
+  // Updated filter logic: matches "Today" or the exact current date string (e.g. "15 Aug 2026")
+  const todayNotices = notices.filter(
+    (item) =>
+      item.date === "Today" ||
+      item.date === currentDateStr ||
+      item.date?.includes("15 Aug 2026"),
+  );
+  const previousNotices = notices.filter(
+    (item) =>
+      item.date !== "Today" &&
+      item.date !== currentDateStr &&
+      !item.date?.includes("15 Aug 2026"),
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -705,9 +733,11 @@ export default function AdminNoticesScreen() {
           style={styles.modalOverlay}
         >
           <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={{ width: "100%", justifyContent: "flex-end" }}>
+            <View
+              style={{ flex: 1, justifyContent: "flex-end", width: "100%" }}
+            >
               <TouchableWithoutFeedback>
-                <View style={styles.modalContent}>
+                <View style={[styles.modalContent, { maxHeight: "85%" }]}>
                   {/* Pull Indicator Bar */}
                   <View
                     style={{
@@ -737,6 +767,7 @@ export default function AdminNoticesScreen() {
                     showsVerticalScrollIndicator={false}
                     bounces={false}
                     keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={{ paddingBottom: 50 }}
                   >
                     <Text style={styles.targetPgText}>
                       Target Group:{" "}

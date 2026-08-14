@@ -1,216 +1,370 @@
-// ReportBuilder.ts
-
-export interface ReportItem {
-  id: string;
-  primaryText: string;
-  secondaryText: string;
-  amountOrContact: string;
-  statusOrMeta: string;
-}
-
-export interface ReportConfig {
+export interface ReportOptions {
   branch: string;
-  month: string; // <-- Updated from startDate/endDate to single month field
+  month: string;
   generatedBy: string;
   reportType: "rent" | "expense" | "tenants";
-}
-
-export class ReportData {
-  static getReportTitle(type: "rent" | "expense" | "tenants"): string {
-    switch (type) {
-      case "rent":
-        return "Monthly Rent Collection & Ledger Statement";
-      case "expense":
-        return "Utility Bills & Maintenance Expense Statement";
-      case "tenants":
-        return "Active Occupants & Tenants Directory";
-    }
-  }
-
-  static getSummaryMeta(type: "rent" | "expense" | "tenants") {
-    switch (type) {
-      case "rent":
-        return {
-          totalLabel: "Total Rooms Managed",
-          totalVal: "24",
-          secondaryLabel: "Occupancy Rate",
-          secondaryVal: "92%",
-        };
-      case "expense":
-        return {
-          totalLabel: "Total Recorded Expenses",
-          totalVal: "₹34,500",
-          secondaryLabel: "Pending Approvals",
-          secondaryVal: "0",
-        };
-      case "tenants":
-        return {
-          totalLabel: "Total Active Tenants",
-          totalVal: "22",
-          secondaryLabel: "Vacant Beds",
-          secondaryVal: "2",
-        };
-    }
-  }
-
-  static getTableHeaders(type: "rent" | "expense" | "tenants"): string[] {
-    switch (type) {
-      case "rent":
-        return ["Tenant Name", "Room No", "Rent Amount", "Payment Status"];
-      case "expense":
-        return ["Expense Category", "Vendor / Description", "Amount"];
-      case "tenants":
-        return ["Tenant Name", "Room No", "Contact Number", "Status"];
-    }
-  }
-
-  static getTableRows(type: "rent" | "expense" | "tenants"): ReportItem[] {
-    switch (type) {
-      case "rent":
-        return [
-          {
-            id: "1",
-            primaryText: "Rahul Sharma",
-            secondaryText: "Room 101-A",
-            amountOrContact: "₹6,500",
-            statusOrMeta: "PAID",
-          },
-          {
-            id: "2",
-            primaryText: "Aman Patel",
-            secondaryText: "Room 102-B",
-            amountOrContact: "₹7,000",
-            statusOrMeta: "PENDING",
-          },
-          {
-            id: "3",
-            primaryText: "Vikas Verma",
-            secondaryText: "Room 201-A",
-            amountOrContact: "₹6,500",
-            statusOrMeta: "PAID",
-          },
-        ];
-      case "expense":
-        return [
-          {
-            id: "1",
-            primaryText: "Electricity Bill",
-            secondaryText: "MSEB Power Board",
-            amountOrContact: "₹12,400",
-            statusOrMeta: "Paid",
-          },
-          {
-            id: "2",
-            primaryText: "High-speed Wi-Fi",
-            secondaryText: "Jio Fiber Lease",
-            amountOrContact: "₹2,499",
-            statusOrMeta: "Paid",
-          },
-        ];
-      case "tenants":
-        return [
-          {
-            id: "1",
-            primaryText: "Rahul Sharma",
-            secondaryText: "Room 101-A",
-            amountOrContact: "+91 98765 43210",
-            statusOrMeta: "Active",
-          },
-          {
-            id: "2",
-            primaryText: "Aman Patel",
-            secondaryText: "Room 102-B",
-            amountOrContact: "+91 91234 56789",
-            statusOrMeta: "Active",
-          },
-        ];
-    }
-  }
+  detailed: boolean;
+  watermark: boolean;
+  subFilter?: "all" | "active" | "notice" | "defaulters";
+  tableData?: any[];
 }
 
 export class ReportFormatter {
-  static generateHTML(config: ReportConfig): string {
-    const title = ReportData.getReportTitle(config.reportType);
-    const meta = ReportData.getSummaryMeta(config.reportType);
-    const headers = ReportData.getTableHeaders(config.reportType);
-    const rows = ReportData.getTableRows(config.reportType);
+  static generateHTML(options: ReportOptions): string {
+    const {
+      branch,
+      month,
+      generatedBy,
+      reportType,
+      detailed,
+      watermark,
+      subFilter,
+      tableData = [],
+    } = options;
 
-    const tableHeadersHTML = headers.map((h) => `<th>${h}</th>`).join("");
+    // --- Yahan par aap check kar sakte hain ki API se kya data aa raha hai ---
+    console.log("--- REPORT FORMATTER DEBUG ---");
+    console.log("Report Type:", reportType);
+    console.log("Received tableData:", tableData);
+    console.log("Total Records Count:", tableData.length);
+    console.log("------------------------------");
 
-    const tableRowsHTML = rows
-      .map((row) => {
-        if (config.reportType === "rent") {
-          const isPaid = row.statusOrMeta === "PAID";
-          const badgeClass = isPaid ? "status-paid" : "status-pending";
-          return `
-          <tr>
-            <td><b>${row.primaryText}</b></td>
-            <td>${row.secondaryText}</td>
-            <td>${row.amountOrContact}</td>
-            <td><span class="${badgeClass}">${row.statusOrMeta}</span></td>
-          </tr>
-        `;
-        } else if (config.reportType === "expense") {
-          return `
-          <tr>
-            <td><b>${row.primaryText}</b></td>
-            <td>${row.secondaryText}</td>
-            <td><b>${row.amountOrContact}</b></td>
-          </tr>
-        `;
-        } else {
-          return `
-          <tr>
-            <td><b>${row.primaryText}</b></td>
-            <td>${row.secondaryText}</td>
-            <td>${row.amountOrContact}</td>
-            <td><span class="status-active">${row.statusOrMeta}</span></td>
-          </tr>
-        `;
-        }
-      })
-      .join("");
+    const moduleConfig = {
+      rent: {
+        title: "RENT ROLL & COLLECTION AUDIT",
+        color: "#1E3A8A",
+        badgeBg: "#DBEAFE",
+      },
+      expense: {
+        title: "OPERATIONAL EXPENSE STATEMENT",
+        color: "#0369A1",
+        badgeBg: "#E0F2FE",
+      },
+      tenants: {
+        title: `TENANT DIRECTORY (${subFilter?.toUpperCase() || "ALL"})`,
+        color: "#047857",
+        badgeBg: "#D1FAE5",
+      },
+    };
+
+    const currentConfig = moduleConfig[reportType];
+
+    const renderEmptyRow = (colSpan: number, message: string) => `
+      <tr>
+        <td colspan="${colSpan}" style="text-align: center; padding: 20px; color: #6B7280; font-style: italic;">
+          ${message}
+        </td>
+      </tr>
+    `;
+
+    // Calculate dynamic totals for numeric columns
+    const calculateTotal = (key: string) => {
+      return tableData.reduce((acc, row) => {
+        const val = parseFloat(String(row[key]).replace(/[^0-9.-]+/g, ""));
+        return acc + (isNaN(val) ? 0 : val);
+      }, 0);
+    };
+
+    const totalRentAmount =
+      reportType === "rent" ? calculateTotal("amount") : 0;
+    const totalExpenseAmount =
+      reportType === "expense" ? calculateTotal("amount") : 0;
+    const totalDepositAmount =
+      reportType === "tenants" ? calculateTotal("deposit") : 0;
 
     return `
       <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <style>
-            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 30px; color: #1E293B; background: #FFF; }
-            .brand-header { border-bottom: 2px solid #2563EB; padding-bottom: 15px; margin-bottom: 20px; }
-            .company-name { font-size: 22px; font-weight: 800; color: #1E293B; margin: 0; }
-            .report-title { font-size: 14px; font-weight: 600; color: #2563EB; margin-top: 4px; }
-            .meta-badge { font-size: 12px; color: #64748B; margin-top: 5px; }
-            .summary-box { background: #F8FAFC; padding: 12px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #E2E8F0; font-size: 13px; color: #475569; }
-            .summary-val { font-weight: 700; color: #0F172A; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
-            th { background: #1E293B; color: #FFFFFF; text-align: left; padding: 10px; font-weight: 600; text-transform: uppercase; }
-            td { border-bottom: 1px solid #E2E8F0; padding: 10px; color: #334155; }
-            tr:nth-child(even) { background-color: #F8FAFC; }
-            .status-paid { color: #059669; background: #ECFDF5; padding: 3px 6px; border-radius: 4px; font-weight: bold; font-size: 10px; }
-            .status-pending { color: #DC2626; background: #FEF2F2; padding: 3px 6px; border-radius: 4px; font-weight: bold; font-size: 10px; }
-            .status-active { color: #2563EB; background: #EFF6FF; padding: 3px 6px; border-radius: 4px; font-weight: bold; font-size: 10px; }
-            .footer { margin-top: 30px; font-size: 11px; color: #94A3B8; border-top: 1px solid #E2E8F0; padding-top: 10px; text-align: right; }
-          </style>
-        </head>
-        <body>
-          <div class="brand-header">
-            <div class="company-name">${config.branch}</div>
-            <div class="report-title">${title}</div>
-            <div class="meta-badge">Report Period (Month): ${config.month}</div>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <title>${currentConfig.title}</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #1F2937;
+            background-color: #FFFFFF;
+            padding: 35px;
+            font-size: 12px;
+            line-height: 1.5;
+            position: relative;
+          }
+          .watermark-layer {
+            position: absolute;
+            top: 30%;
+            left: 5%;
+            width: 90%;
+            text-align: center;
+            font-size: 56px;
+            color: rgba(156, 163, 175, 0.14);
+            transform: rotate(-25deg);
+            font-weight: 900;
+            z-index: 9999;
+            pointer-events: none;
+            letter-spacing: 6px;
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #E5E7EB;
+            padding-bottom: 18px;
+            margin-bottom: 25px;
+          }
+          .company-info h1 { font-size: 18px; font-weight: 800; color: #111827; }
+          .company-info p { font-size: 11px; color: #6B7280; margin-top: 3px; }
+          .report-badge {
+            background-color: ${currentConfig.badgeBg};
+            color: ${currentConfig.color};
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+          }
+          .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            background: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin-bottom: 25px;
+          }
+          .meta-item label { display: block; font-size: 9px; text-transform: uppercase; color: #6B7280; font-weight: 700; }
+          .meta-item span { font-size: 12px; font-weight: 600; color: #111827; margin-top: 2px; display: block; }
+          .kpi-container { display: flex; gap: 12px; margin-bottom: 25px; }
+          .kpi-card {
+            flex: 1;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-left: 4px solid ${currentConfig.color};
+            border-radius: 6px;
+            padding: 12px 14px;
+          }
+          .kpi-label { font-size: 9px; color: #64748B; text-transform: uppercase; font-weight: 700; }
+          .kpi-value { font-size: 15px; font-weight: 800; color: #0F172A; margin-top: 3px; }
+          h3 { font-size: 13px; font-weight: 700; color: #374151; margin-bottom: 10px; text-transform: uppercase; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+          th {
+            background-color: #F1F5F9;
+            color: #334155;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 2px solid #CBD5E1;
+          }
+          td { padding: 11px 12px; font-size: 11px; color: #334155; border-bottom: 1px solid #E2E8F0; }
+          tr:nth-child(even) { background-color: #F8FAFC; }
+          .total-row {
+            background-color: #F1F5F9 !important;
+            font-weight: 700;
+            border-top: 2px solid #CBD5E1;
+          }
+          .badge-success { background-color: #DCFCE7; color: #166534; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 10px; }
+          .badge-pending { background-color: #FEF3C7; color: #92400E; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 10px; }
+          .signatory-section { margin-top: 40px; display: flex; justify-content: flex-end; }
+          .signatory-box { text-align: center; width: 200px; }
+          .signature-line { border-bottom: 1px solid #9CA3AF; margin-bottom: 6px; padding-bottom: 25px; }
+          .signatory-title { font-size: 11px; font-weight: 700; color: #374151; }
+          .signatory-sub { font-size: 9px; color: #6B7280; margin-top: 2px; }
+          .footer {
+            margin-top: 30px;
+            border-top: 1px solid #E5E7EB;
+            padding-top: 12px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: #9CA3AF;
+          }
+        </style>
+      </head>
+      <body>
+
+        ${watermark ? `<div class="watermark-layer">CONFIDENTIAL • PG MANAGEMENT</div>` : ""}
+
+        <div class="header">
+          <div class="company-info">
+            <h1>PG Management Enterprise Hub</h1>
+            <p>Automated Property Operations & Financial Intelligence</p>
           </div>
-          <div class="summary-box">
-            <div>${meta.totalLabel}: <span class="summary-val">${meta.totalVal}</span></div>
-            <div>${meta.secondaryLabel}: <span class="summary-val">${meta.secondaryVal}</span></div>
-            <div>Admin In-Charge: <span class="summary-val">${config.generatedBy}</span></div>
+          <div>
+            <div class="report-badge">${currentConfig.title}</div>
           </div>
+        </div>
+
+        <div class="meta-grid">
+          <div class="meta-item">
+            <label>Selected Flat / Branch</label>
+            <span>${branch}</span>
+          </div>
+          <div class="meta-item">
+            <label>Duration / Date Range</label>
+            <span>${month}</span>
+          </div>
+          <div class="meta-item">
+            <label>Generated By</label>
+            <span>${generatedBy}</span>
+          </div>
+        </div>
+
+        <div class="kpi-container">
+          <div class="kpi-card">
+            <div class="kpi-label">Total Records Logged</div>
+            <div class="kpi-value">${tableData.length} Entries</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Audit Verification</div>
+            <div class="kpi-value" style="color: #047857;">Verified</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Module Type</div>
+            <div class="kpi-value" style="text-transform: uppercase;">${reportType}</div>
+          </div>
+        </div>
+
+        ${
+          reportType === "rent"
+            ? `
+          <h3>Rent Roll Itemized Ledger</h3>
           <table>
-            <thead><tr>${tableHeadersHTML}</tr></thead>
-            <tbody>${tableRowsHTML}</tbody>
+            <thead>
+              <tr>
+                <th>Receipt ID</th>
+                <th>Tenant Name</th>
+                <th>Flat / Bed Details</th>
+                <th>Mode</th>
+                <th>Status</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                tableData.length > 0
+                  ? tableData
+                      .map(
+                        (row: any) => `
+                    <tr>
+                      <td>${row.id}</td>
+                      <td>${row.tenantName}</td>
+                      <td>${row.flatDetails}</td>
+                      <td>${row.paymentMode}</td>
+                      <td><span class="badge-success">${row.status}</span></td>
+                      <td style="text-align: right; font-weight: 700;">${row.amount}</td>
+                    </tr>
+                  `,
+                      )
+                      .join("") +
+                    `
+                    <tr class="total-row">
+                      <td colspan="5" style="text-align: right; text-transform: uppercase;">Total Rent Collection:</td>
+                      <td style="text-align: right;">${totalRentAmount.toLocaleString()}</td>
+                    </tr>
+                  `
+                  : renderEmptyRow(6, "No rent records found for this period.")
+              }
+            </tbody>
           </table>
-          <div class="footer">Generated via Kunal PG Management System • Page 1 of 1</div>
-        </body>
+        `
+            : reportType === "expense"
+              ? `
+          <h3>Operational Expense Log</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Category</th>
+                <th>Description</th>
+                <th>Branch / Flat</th>
+                <th style="text-align: right;">Expense Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                tableData.length > 0
+                  ? tableData
+                      .map(
+                        (row: any) => `
+                    <tr>
+                      <td>${row.date}</td>
+                      <td>${row.category}</td>
+                      <td>${row.description}</td>
+                      <td>${row.branchName}</td>
+                      <td style="text-align: right; font-weight: 700;">${row.amount}</td>
+                    </tr>
+                  `,
+                      )
+                      .join("") +
+                    `
+                    <tr class="total-row">
+                      <td colspan="4" style="text-align: right; text-transform: uppercase;">Total Expenses:</td>
+                      <td style="text-align: right;">${totalExpenseAmount.toLocaleString()}</td>
+                    </tr>
+                  `
+                  : renderEmptyRow(5, "No expense logs recorded.")
+              }
+            </tbody>
+          </table>
+        `
+              : `
+          <h3>Active Tenant Directory (${subFilter?.toUpperCase() || "ALL"})</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Tenant Name</th>
+                <th>Contact Number</th>
+                <th>Assigned Flat & Bed</th>
+                <th>Status</th>
+                <th style="text-align: right;">Deposit Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                tableData.length > 0
+                  ? tableData
+                      .map(
+                        (row: any) => `
+                    <tr>
+                      <td>${row.name}</td>
+                      <td>${row.phone}</td>
+                      <td>${row.flat}</td>
+                      <td><span class="${String(row.status).toLowerCase().includes("active") ? "badge-success" : "badge-pending"}">${row.status}</span></td>
+                      <td style="text-align: right; font-weight: 700;">${row.deposit}</td>
+                    </tr>
+                  `,
+                      )
+                      .join("") +
+                    `
+                    <tr class="total-row">
+                      <td colspan="4" style="text-align: right; text-transform: uppercase;">Total Security Deposit:</td>
+                      <td style="text-align: right;">${totalDepositAmount.toLocaleString()}</td>
+                    </tr>
+                  `
+                  : renderEmptyRow(5, "No tenant records found.")
+              }
+            </tbody>
+          </table>
+        `
+        }
+
+        <div class="signatory-section">
+          <div class="signatory-box">
+            <div class="signature-line"></div>
+            <div class="signatory-title">Authorized Signatory</div>
+            <div class="signatory-sub">PG Management System</div>
+          </div>
+        </div>
+
+        <div class="footer">
+          <span>Confidential Business Document • Generated via PG Management App</span>
+          <span>Timestamp: ${new Date().toLocaleString()}</span>
+        </div>
+
+      </body>
       </html>
     `;
   }
