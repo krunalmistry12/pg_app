@@ -21,6 +21,7 @@ import {
   View,
 } from "react-native";
 import { COLORS, RADIUS, SPACING } from "../src/constants/theme";
+import { expenseService } from "../src/services/Utility/expenseEndpoints";
 import { commonStyles } from "../src/styles/commonStyles";
 import { ReportFormatter } from "../src/utils/ReportBuilder";
 
@@ -173,8 +174,6 @@ export default function ReportsScreenPro() {
       // Fetch tenants and flats data using respective APIs
       console.log("👉 Fetching tenants using getTenantsByUserIdApi...");
       const tenantsResponse = await getTenantsByUserIdApi(storedUserId);
-      console.log("👉 Raw tenants response received:", tenantsResponse);
-
       let apiTenantsArray = Array.isArray(tenantsResponse)
         ? tenantsResponse
         : tenantsResponse?.data || tenantsResponse?.tenants || [];
@@ -205,17 +204,11 @@ export default function ReportsScreenPro() {
       }
 
       if (reportType === "rent") {
-        console.log("👉 Fetching rent records for month/year:", {
-          month: startDate.getMonth() + 1,
-          year: startDate.getFullYear().toString(),
-        });
-
+        console.log("👉 Fetching rent records...");
         const rentResponse = await rentService.getAllRentRecords({
           month: startDate.getMonth() + 1,
           year: startDate.getFullYear().toString(),
         });
-
-        console.log("👉 Raw rentResponse received:", rentResponse);
 
         let rentArray = Array.isArray(rentResponse)
           ? rentResponse
@@ -229,7 +222,6 @@ export default function ReportsScreenPro() {
             tenantFlatMap[tName] ||
             (item.flatNumber ? `Flat ${item.flatNumber}` : "Flat N/A");
 
-          // Filter by selected branch if not "All Flats"
           if (
             selectedBranch !== "All Flats" &&
             !mappedFlat.includes(selectedBranch)
@@ -255,6 +247,50 @@ export default function ReportsScreenPro() {
                   : "₹0",
           });
         });
+      } else if (reportType === "expense") {
+        console.log("👉 Fetching operational expenses via expenseService...");
+        // Pass current month string or identifier as needed
+        const currentMonthQuery = startDate.toLocaleDateString("en-GB", {
+          month: "short",
+          year: "numeric",
+        });
+
+        const expenseArray =
+          await expenseService.fetchExpenses(currentMonthQuery);
+        console.log("👉 Raw expenses response received:", expenseArray);
+
+        if (Array.isArray(expenseArray)) {
+          expenseArray.forEach((item: any) => {
+            // Match flat/branch name from flatId if available
+            let branchName = "General Property";
+            if (item.flatId && Array.isArray(apiFlatsArray)) {
+              const matchedFlat = apiFlatsArray.find(
+                (f: any) => f.id === item.flatId || f.FlatId === item.flatId,
+              );
+              if (matchedFlat) {
+                branchName = matchedFlat.apartmentName
+                  ? `${matchedFlat.apartmentName} - Flat ${matchedFlat.flatNumber || ""}`
+                  : matchedFlat.name || `Flat ${matchedFlat.flatNumber || ""}`;
+              }
+            }
+
+            // Filter by selected branch if not "All Flats"
+            if (
+              selectedBranch !== "All Flats" &&
+              !branchName.includes(selectedBranch)
+            ) {
+              return;
+            }
+
+            rawData.push({
+              date: item.date || "Today",
+              category: item.category || "General",
+              description: item.title || item.notes || "Operational Expense",
+              branchName: branchName,
+              amount: `₹${item.amount || 0}`,
+            });
+          });
+        }
       } else {
         if (Array.isArray(apiTenantsArray) && apiTenantsArray.length > 0) {
           apiTenantsArray.forEach((tenantItem: any) => {

@@ -1,50 +1,63 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import * as Sharing from "expo-sharing"; // Added for viewing/sharing files
-import React, { useState } from "react";
+import * as Sharing from "expo-sharing";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Keyboard,
   Modal,
   SafeAreaView,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from "react-native";
+import { expenseService } from "../src/services/Utility/expenseEndpoints";
+import { styles } from "../src/styles/Admin/UtilitiesStyles";
+
+interface PGBranch {
+  id: string | null;
+  name: string;
+}
 
 export default function AdminUtilitiesScreen() {
   const router = useRouter();
 
-  const pgBranches = [
-    "All PGs (Common)",
-    "Sunrise PG (Branch 1)",
-    "Elite Boys PG (Branch 2)",
-    "Co-Living PG (Branch 3)",
-  ];
-  const [selectedPG, setSelectedPG] = useState(pgBranches[0]);
-
-  const [selectedMonth, setSelectedMonth] = useState("Jun 2026");
-  const monthsList = ["Jun 2026", "May 2026", "Apr 2026", "Mar 2026"];
-
-  const [expenses, setExpenses] = useState([
-    {
-      id: "1",
-      pgName: "All PGs (Common)",
-      title: "Software Subscription / Management Tool",
-      category: "Maintenance",
-      amount: "2000",
-      month: "Jun 2026",
-      date: "01 Jun",
-      receiptName: "invoice_sw_jun.pdf",
-      receiptUri: "", // Local URI save karne ke liye
-    },
+  const [pgBranches, setPgBranches] = useState<PGBranch[]>([
+    { id: null, name: "All PGs (Common)" },
   ]);
+  const [selectedPG, setSelectedPG] = useState<PGBranch>({
+    id: null,
+    name: "All PGs (Common)",
+  });
+  const [loadingFlats, setLoadingFlats] = useState<boolean>(false);
+  const [loadingExpenses, setLoadingExpenses] = useState<boolean>(false);
+
+  // Dynamically generate current month and past 11 months for historical viewing
+  const generateMonthsList = () => {
+    const list = [];
+    const date = new Date();
+    for (let i = 0; i < 12; i++) {
+      const formatted = date.toLocaleDateString("en-GB", {
+        month: "short",
+        year: "numeric",
+      });
+      list.push(formatted);
+      date.setMonth(date.getMonth() - 1);
+    }
+    return list;
+  };
+
+  const monthsList = generateMonthsList();
+  const [selectedMonth, setSelectedMonth] = useState(monthsList[0]);
+
+  const [expenses, setExpenses] = useState<any[]>([]);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [title, setTitle] = useState("");
@@ -64,36 +77,150 @@ export default function AdminUtilitiesScreen() {
     "Staff Salary",
   ];
 
-  const handleAddExpense = () => {
-    if (!title || !amount) return;
-    const newExp = {
-      id: Date.now().toString(),
-      pgName:
-        selectedPG === "All PGs (Common)"
-          ? "Sunrise PG (Branch 1)"
-          : selectedPG,
-      title,
-      category,
-      amount,
-      month: selectedMonth,
-      date: "Today",
-      receiptName: attachedFile || "",
-      receiptUri: attachedUri || "",
-    };
-    setExpenses([newExp, ...expenses]);
-    setTitle("");
-    setAmount("");
-    setAttachedFile(null);
-    setAttachedUri(null);
-    setModalVisible(false);
+  useEffect(() => {
+    loadFlats();
+  }, []);
+
+  useEffect(() => {
+    loadExpenses();
+  }, [selectedPG, selectedMonth]);
+
+  const loadFlats = async () => {
+    try {
+      setLoadingFlats(true);
+      const flatList = await expenseService.fetchFlats();
+
+      if (Array.isArray(flatList) && flatList.length > 0) {
+        const dynamicFlats: PGBranch[] = flatList.map(
+          (flat: any, fIdx: number) => {
+            const flatId = flat.id || flat.Id || `flat-${fIdx}`;
+            const aptName =
+              flat.apartmentName || flat.ApartmentName || "Apartment";
+            const flatNumber =
+              flat.flatNumber || flat.FlatNumber || `Flat ${fIdx + 1}`;
+            return {
+              id: flatId,
+              name: `${aptName} (${flatNumber})`,
+            };
+          },
+        );
+
+        const updatedBranches = [
+          { id: null, name: "All PGs (Common)" },
+          ...dynamicFlats,
+        ];
+        setPgBranches(updatedBranches);
+      }
+    } catch (error) {
+      console.log("Error loading flats layout:", error);
+    } finally {
+      setLoadingFlats(false);
+    }
+  };
+const getCategoryIcon = (cat: string) => {
+    switch (cat?.toLowerCase()) {
+      case "light bill":
+        return "flash-outline";
+      case "internet":
+        return "wifi-outline";
+      case "water":
+        return "water-outline";
+      case "maintenance":
+        return "construct-outline";
+      case "staff salary":
+        return "people-outline";
+      default:
+        return "receipt-outline";
+    }
+  };
+  const loadExpenses = async () => {
+    try {
+      setLoadingExpenses(true);
+      const formatted = await expenseService.fetchExpenses(selectedMonth);
+      setExpenses(formatted);
+    } catch (error) {
+      console.log("Error loading expenses screen data:", error);
+    } finally {
+      setLoadingExpenses(false);
+    }
   };
 
-  const handleDeleteExpense = (id: string) => {
-    setExpenses(expenses.filter((item) => item.id !== id));
-    setDetailModalVisible(false);
+  const handleAddExpense = async () => {
+    if (!title || !amount) {
+      Alert.alert("Validation", "Please enter title and amount.");
+      return;
+    }
+
+    try {
+      const storedUserId =
+        (await AsyncStorage.getItem("userId")) ||
+        "3fa85f64-5717-4562-b3fc-2c963f66afa6";
+      const targetFlatId =
+        selectedPG.id ||
+        pgBranches.find((b) => b.id !== null)?.id ||
+        "3fa85f64-5717-4562-b3fc-2c963f66afa6";
+
+      const payload = {
+        flatId: targetFlatId,
+        isCommonExpense: selectedPG.id === null,
+        userId: storedUserId,
+        title: title,
+        category: category,
+        amount: Number(amount),
+        month: selectedMonth,
+        date: new Date().toISOString(),
+        paymentMode: "Online",
+        paidBy: "Admin",
+        status: "Success",
+        receiptName: attachedFile || "",
+        receiptUri: attachedUri || "",
+        notes: "Created via Mobile App",
+      };
+
+      await expenseService.createExpense(payload);
+      loadExpenses();
+
+      setTitle("");
+      setAmount("");
+      setAttachedFile(null);
+      setAttachedUri(null);
+      setModalVisible(false);
+      Alert.alert("Success", "Expense added successfully!");
+    } catch (error) {
+      console.log("Error creating expense:", error);
+      Alert.alert("Error", "Failed to save expense to server.");
+    }
   };
 
-  // Attachment Picker
+  const confirmAndDeleteExpense = (id: string, expenseTitle: string) => {
+    Alert.alert(
+      "Confirm Deletion",
+      `Are you sure you want to delete "${expenseTitle}"? This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await expenseService.deleteExpense(id);
+              setExpenses((prev) => prev.filter((item) => item.id !== id));
+              setDetailModalVisible(false);
+              Alert.alert("Deleted", "Expense record removed successfully.");
+            } catch (error: any) {
+              console.log(
+                "Error deleting expense details:",
+                error?.response?.data || error.message,
+              );
+              Alert.alert("Error", "Could not delete expense from server.");
+            }
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  };
+
   const showAttachmentOptions = () => {
     Alert.alert(
       "Attach Bill / Receipt",
@@ -162,10 +289,9 @@ export default function AdminUtilitiesScreen() {
     );
   };
 
-  // FUNCTION TO VIEW ATTACHED FILE
   const handleViewAttachment = async (uri: string) => {
     if (!uri) {
-      Alert.alert("Notice", "No file preview available for this sample item.");
+      Alert.alert("Notice", "No file preview available for this item.");
       return;
     }
     try {
@@ -185,12 +311,14 @@ export default function AdminUtilitiesScreen() {
 
   const filteredExpenses = expenses.filter(
     (item) =>
-      (selectedPG === "All PGs (Common)" || item.pgName === selectedPG) &&
+      (selectedPG.id === null ||
+        item.flatId === selectedPG.id ||
+        item.isCommonExpense) &&
       item.month === selectedMonth,
   );
 
   const totalPGMonthExpense = filteredExpenses.reduce(
-    (sum, item) => sum + Number(item.amount),
+    (sum, item) => sum + Number(item.amount || 0),
     0,
   );
 
@@ -202,7 +330,7 @@ export default function AdminUtilitiesScreen() {
           onPress={() => router.back()}
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+          <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>PG Expenses Management</Text>
         <TouchableOpacity
@@ -215,42 +343,46 @@ export default function AdminUtilitiesScreen() {
 
       {/* PG Branches Selector */}
       <View style={styles.pgBarContainer}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.scrollRow}
-        >
-          {pgBranches.map((pg) => (
-            <TouchableOpacity
-              key={pg}
-              style={[
-                styles.pgChip,
-                selectedPG === pg && styles.pgChipActive,
-                pg === "All PGs (Common)" && styles.commonChip,
-              ]}
-              onPress={() => setSelectedPG(pg)}
-            >
-              <Ionicons
-                name={
-                  pg === "All PGs (Common)"
-                    ? "globe-outline"
-                    : "business-outline"
-                }
-                size={14}
-                color={selectedPG === pg ? "#FFF" : "#4B5563"}
-                style={{ marginRight: 6 }}
-              />
-              <Text
+        {loadingFlats ? (
+          <ActivityIndicator
+            size="small"
+            color="#06B6D4"
+            style={{ marginVertical: 6 }}
+          />
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.scrollRow}
+          >
+            {pgBranches.map((pg) => (
+              <TouchableOpacity
+                key={pg.id || "common"}
                 style={[
-                  styles.pgChipText,
-                  selectedPG === pg && styles.pgChipTextActive,
+                  styles.pgChip,
+                  selectedPG.id === pg.id && styles.pgChipActive,
+                  pg.id === null && styles.commonChip,
                 ]}
+                onPress={() => setSelectedPG(pg)}
               >
-                {pg}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+                <Ionicons
+                  name={pg.id === null ? "globe-outline" : "business-outline"}
+                  size={14}
+                  color={selectedPG.id === pg.id ? "#FFF" : "#4B5563"}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[
+                    styles.pgChipText,
+                    selectedPG.id === pg.id && styles.pgChipTextActive,
+                  ]}
+                >
+                  {pg.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
       </View>
 
       {/* Month Selector */}
@@ -284,12 +416,9 @@ export default function AdminUtilitiesScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View
-          style={[
-            styles.banner,
-            selectedPG === "All PGs (Common)" && styles.commonBanner,
-          ]}
+          style={[styles.banner, selectedPG.id === null && styles.commonBanner]}
         >
-          <Text style={styles.bannerLabel}>{selectedPG}</Text>
+          <Text style={styles.bannerLabel}>{selectedPG.name}</Text>
           <Text style={styles.bannerSubLabel}>
             Total Expenses for {selectedMonth}
           </Text>
@@ -302,18 +431,27 @@ export default function AdminUtilitiesScreen() {
           Transactions List ({filteredExpenses.length})
         </Text>
 
-        {filteredExpenses.length === 0 ? (
+        {loadingExpenses ? (
+          <ActivityIndicator
+            size="large"
+            color="#06B6D4"
+            style={{ marginTop: 20 }}
+          />
+        ) : filteredExpenses.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="receipt-outline" size={48} color="#D1D5DB" />
             <Text style={styles.emptyText}>
-              No records found for {selectedPG} in {selectedMonth}
+              No records found for {selectedPG.name} in {selectedMonth}
             </Text>
           </View>
         ) : (
           filteredExpenses.map((item) => (
             <TouchableOpacity
               key={item.id}
-              style={styles.card}
+              style={[
+                styles.card,
+                selectedPG.id !== null && styles.cardSeparate
+              ]}
               onPress={() => {
                 setSelectedExpense(item);
                 setDetailModalVisible(true);
@@ -322,15 +460,19 @@ export default function AdminUtilitiesScreen() {
             >
               <View style={styles.cardLeft}>
                 <View style={styles.iconContainer}>
-                  <Ionicons name="flash-outline" size={20} color="#06B6D4" />
+                  {/* Dynamically assign icon based on category */}
+                  <Ionicons name={getCategoryIcon(item.category) as any} size={20} color="#06B6D4" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.expenseTitle}>{item.title}</Text>
                   <Text style={styles.expenseCategory}>
                     {item.category} • {item.date}
                   </Text>
-                  {selectedPG === "All PGs (Common)" && (
-                    <Text style={styles.branchSubTag}>{item.pgName}</Text>
+                  {selectedPG.id === null && (
+                    <Text style={styles.branchSubTag}>
+                      {pgBranches.find((b) => b.id === item.flatId)?.name ||
+                        item.flatId}
+                    </Text>
                   )}
                 </View>
               </View>
@@ -372,7 +514,7 @@ export default function AdminUtilitiesScreen() {
                 <Text style={styles.targetPgText}>
                   Adding for:{" "}
                   <Text style={{ fontWeight: "bold", color: "#06B6D4" }}>
-                    {selectedPG}
+                    {selectedPG.name}
                   </Text>{" "}
                   ({selectedMonth})
                 </Text>
@@ -464,7 +606,7 @@ export default function AdminUtilitiesScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* Detail Modal with View Attachment Option */}
+      {/* Detail Modal */}
       <Modal
         visible={detailModalVisible}
         animationType="fade"
@@ -500,7 +642,8 @@ export default function AdminUtilitiesScreen() {
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Branch:</Text>
                       <Text style={styles.detailValue}>
-                        {selectedExpense.pgName}
+                        {pgBranches.find((b) => b.id === selectedExpense.flatId)
+                          ?.name || "Common Expense"}
                       </Text>
                     </View>
                     <View style={styles.detailRow}>
@@ -533,7 +676,6 @@ export default function AdminUtilitiesScreen() {
                     </View>
                   </View>
 
-                  {/* VIEW ATTACHMENT BUTTON (If attached) */}
                   {selectedExpense.receiptName ? (
                     <TouchableOpacity
                       style={styles.viewAttachmentBtn}
@@ -562,7 +704,12 @@ export default function AdminUtilitiesScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.deleteActionBtn}
-                      onPress={() => handleDeleteExpense(selectedExpense.id)}
+                      onPress={() =>
+                        confirmAndDeleteExpense(
+                          selectedExpense.id,
+                          selectedExpense.title,
+                        )
+                      }
                     >
                       <Ionicons
                         name="trash-outline"
@@ -582,291 +729,3 @@ export default function AdminUtilitiesScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8F9FA" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: 16,
-    backgroundColor: "#FFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  headerTitle: { fontSize: 17, fontWeight: "bold", color: "#1A1A1A" },
-  backButton: { padding: 4 },
-  addButtonHeader: {
-    backgroundColor: "#06B6D4",
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  pgBarContainer: {
-    backgroundColor: "#FFF",
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
-  },
-  monthBarContainer: {
-    backgroundColor: "#FFF",
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  scrollRow: { paddingHorizontal: 16 },
-  pgChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "#F3F4F6",
-    marginRight: 8,
-  },
-  pgChipActive: { backgroundColor: "#0F172A" },
-  commonChip: { borderWidth: 1, borderColor: "#06B6D4", borderStyle: "dashed" },
-  pgChipText: { fontSize: 13, fontWeight: "600", color: "#4B5563" },
-  pgChipTextActive: { color: "#FFF" },
-  monthChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: "#F3F4F6",
-    marginRight: 6,
-  },
-  monthChipActive: { backgroundColor: "#06B6D4" },
-  monthChipText: { fontSize: 12, fontWeight: "600", color: "#4B5563" },
-  monthChipTextActive: { color: "#FFF" },
-  scrollContent: { padding: 16 },
-  banner: {
-    backgroundColor: "#0F172A",
-    borderRadius: 14,
-    padding: 20,
-    alignItems: "center",
-    marginBottom: 20,
-    elevation: 3,
-  },
-  commonBanner: { backgroundColor: "#0369A1" },
-  bannerLabel: {
-    color: "#38BDF8",
-    fontSize: 14,
-    fontWeight: "bold",
-    marginBottom: 2,
-  },
-  bannerSubLabel: { color: "#94A3B8", fontSize: 12, fontWeight: "500" },
-  bannerAmount: {
-    color: "#FFF",
-    fontSize: 30,
-    fontWeight: "bold",
-    marginVertical: 6,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#1A1A1A",
-    marginBottom: 12,
-  },
-  card: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  cardLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    marginRight: 10,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#ECFEFF",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  expenseTitle: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#1F2937",
-    marginBottom: 2,
-  },
-  expenseCategory: { fontSize: 11, color: "#6B7280" },
-  branchSubTag: {
-    fontSize: 10,
-    color: "#06B6D4",
-    fontWeight: "600",
-    marginTop: 2,
-  },
-  cardRight: { alignItems: "flex-end" },
-  expenseAmount: {
-    fontSize: 15,
-    fontWeight: "bold",
-    color: "#EF4444",
-    marginBottom: 4,
-  },
-  receiptBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#DEF7EC",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  receiptBadgeText: { fontSize: 9, fontWeight: "bold", color: "#03543F" },
-  noReceiptText: { fontSize: 10, color: "#9CA3AF" },
-  emptyContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 40,
-  },
-  emptyText: {
-    color: "#9CA3AF",
-    fontSize: 13,
-    marginTop: 8,
-    textAlign: "center",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalContent: {
-    width: "90%",
-    backgroundColor: "#FFF",
-    borderRadius: 16,
-    padding: 20,
-    elevation: 6,
-  },
-  modalHeaderTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  modalTitle: { fontSize: 18, fontWeight: "bold", color: "#1A1A1A" },
-  targetPgText: {
-    fontSize: 12,
-    color: "#4B5563",
-    marginBottom: 14,
-    backgroundColor: "#F0FDF4",
-    padding: 8,
-    borderRadius: 6,
-  },
-  inputLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#4B5563",
-    marginBottom: 6,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    color: "#1A1A1A",
-    marginBottom: 14,
-    backgroundColor: "#F9FAFB",
-  },
-  categoryRow: { flexDirection: "row", flexWrap: "wrap", marginBottom: 14 },
-  catChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: "#F3F4F6",
-    marginRight: 6,
-    marginBottom: 6,
-  },
-  catChipActive: { backgroundColor: "#06B6D4" },
-  catChipText: { fontSize: 12, fontWeight: "600", color: "#4B5563" },
-  catChipTextActive: { color: "#FFF" },
-  uploadBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderStyle: "dashed",
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: "#F9FAFB",
-    marginBottom: 16,
-  },
-  uploadText: { fontSize: 13, color: "#4B5563", flex: 1 },
-  saveBtn: {
-    backgroundColor: "#06B6D4",
-    borderRadius: 8,
-    padding: 14,
-    alignItems: "center",
-  },
-  saveBtnText: { color: "#FFF", fontWeight: "bold", fontSize: 15 },
-  detailContainer: {
-    backgroundColor: "#F9FAFB",
-    borderRadius: 8,
-    padding: 12,
-    marginVertical: 12,
-  },
-  detailRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  detailLabel: { fontSize: 12, fontWeight: "600", color: "#6B7280" },
-  detailValue: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: "#1F2937",
-    maxWidth: "60%",
-    textAlign: "right",
-  },
-  viewAttachmentBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#ECFEFF",
-    borderWidth: 1,
-    borderColor: "#06B6D4",
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 12,
-  },
-  viewAttachmentText: { color: "#06B6D4", fontWeight: "bold", fontSize: 13 },
-  actionButtonRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 4,
-  },
-  closeDetailBtn: {
-    flex: 1,
-    backgroundColor: "#F3F4F6",
-    borderRadius: 8,
-    padding: 12,
-    alignItems: "center",
-    marginRight: 8,
-  },
-  closeDetailText: { color: "#4B5563", fontWeight: "bold", fontSize: 14 },
-  deleteActionBtn: {
-    flex: 1,
-    flexDirection: "row",
-    backgroundColor: "#EF4444",
-    borderRadius: 8,
-    padding: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 8,
-  },
-  deleteActionText: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
-});

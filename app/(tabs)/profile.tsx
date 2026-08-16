@@ -1,34 +1,34 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import * as Location from "expo-location";
-import * as Print from "expo-print";
 import { router } from "expo-router";
-import * as Sharing from "expo-sharing";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Modal,
-  Platform,
   SafeAreaView,
   ScrollView,
   StatusBar,
   Text,
+  TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from "react-native";
+import { profileService } from "../../src/services/profileService";
 import { styles } from "../../src/styles/Admin/ProfileStyles ";
-import { ReportFormatter } from "../../src/utils/ReportBuilder";
 
 interface AdminProfileData {
+  userId: string;
   name: string;
   email: string;
   phone: string;
   role: string;
   pgName: string;
   location: string;
+  address: string;
+  city: string;
   branches: string[];
   subscriptionPlan?: string;
   subscriptionExpiry?: string;
@@ -41,17 +41,31 @@ export default function Profile() {
   const [isSubModalVisible, setIsSubModalVisible] = useState(false);
   const [isSupportModalVisible, setIsSupportModalVisible] = useState(false);
 
+  // Edit Profile Modal States
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  // Editable Form State
+  const [editFullName, setEditFullName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editPgName, setEditPgName] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+  const [editCity, setEditCity] = useState("");
+
   const [selectedReportType, setSelectedReportType] = useState<
     "rent" | "expense" | "tenants"
   >("rent");
 
   const [adminProfile, setAdminProfile] = useState<AdminProfileData>({
+    userId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
     name: "Loading...",
     email: "",
     phone: "",
     role: "PG Administrator",
     pgName: "My PG Property",
     location: "Fetching location...",
+    address: "",
+    city: "Ahmedabad",
     branches: ["Main Branch"],
     subscriptionPlan: "Pro Business Plan",
     subscriptionExpiry: "Dec 31, 2026",
@@ -100,12 +114,18 @@ export default function Profile() {
       if (storedData) {
         const parsed = JSON.parse(storedData);
         const mappedProfile: AdminProfileData = {
-          name: parsed.ownerName || "Administrator",
+          userId:
+            parsed.userId ||
+            parsed.id ||
+            "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          name: parsed.ownerName || parsed.fullName || "Administrator",
           email: parsed.email || "admin@pgproperty.com",
           phone: parsed.phone || "+91 9876543210",
           role: "PG Owner & Administrator",
           pgName: parsed.pgName || "My PG Property",
-          location: parsed.location || currentArea,
+          location: parsed.city || parsed.location || currentArea,
+          address: parsed.address || "",
+          city: parsed.city || currentArea,
           branches:
             parsed.branches?.length > 0
               ? parsed.branches
@@ -120,12 +140,15 @@ export default function Profile() {
         }
       } else {
         const freshData: AdminProfileData = {
+          userId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
           name: "Administrator",
           email: "admin@pgproperty.com",
           phone: "+91 9876543210",
           role: "PG Owner & Administrator",
           pgName: "My PG Property",
           location: currentArea,
+          address: "",
+          city: currentArea,
           branches: ["Main Branch"],
           subscriptionPlan: "Pro Business Plan",
           subscriptionExpiry: "Dec 31, 2026",
@@ -140,13 +163,66 @@ export default function Profile() {
     }
   };
 
-  const formatMonthYear = (date: Date) => {
-    return date.toLocaleString("default", { month: "long", year: "numeric" });
+  const openEditModal = () => {
+    setEditFullName(adminProfile.name);
+    setEditPhone(adminProfile.phone);
+    setEditPgName(adminProfile.pgName);
+    setEditAddress(adminProfile.address);
+    setEditCity(adminProfile.city);
+    setIsEditModalVisible(true);
   };
 
-  const onDateChange = (event: any, date?: Date) => {
-    if (Platform.OS === "android") setShowDatePicker(false);
-    if (date) setSelectedDate(date);
+  const handleSaveProfile = async () => {
+    if (!editFullName.trim() || !editPgName.trim()) {
+      Alert.alert("Validation Error", "Full Name and PG Name cannot be empty.");
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      const payload = {
+        userId: adminProfile.userId,
+        fullName: editFullName,
+        email: adminProfile.email,
+        phone: editPhone,
+        pgName: editPgName,
+        address: editAddress,
+        city: editCity,
+      };
+
+      // Call API Endpoint (PUT /api/User/update-profile)
+      await profileService.updateProfile(payload);
+
+      // Update local state
+      const updatedProfile = {
+        ...adminProfile,
+        name: editFullName,
+        phone: editPhone,
+        pgName: editPgName,
+        address: editAddress,
+        city: editCity,
+        location: editCity,
+      };
+
+      setAdminProfile(updatedProfile);
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          ...updatedProfile,
+          ownerName: editFullName,
+        }),
+      );
+
+      setIsUpdating(false);
+      setIsEditModalVisible(false);
+      Alert.alert("Success", "Profile updated successfully!");
+    } catch (error: any) {
+      setIsUpdating(false);
+      Alert.alert(
+        "Update Failed",
+        error?.message || "Could not update profile details on server.",
+      );
+    }
   };
 
   const logout = async () => {
@@ -168,22 +244,6 @@ export default function Profile() {
     Alert.alert(title, message, [{ text: "OK" }]);
   };
 
-  const generateAndDownloadPDF = async () => {
-    if (isGenerating) return;
-    setIsGenerating(true);
-
-    try {
-   
-
-      setIsGenerating(false);
-
-      setIsReportModalVisible(false);
-    } catch (error: any) {
-      setIsGenerating(false);
-      Alert.alert("PDF Error", `Failed: ${error?.message || "Unknown error"}`);
-    }
-  };
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
@@ -192,14 +252,13 @@ export default function Profile() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
       >
-        {/* Simple Header */}
         <View
           style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10 }}
         >
           <Text style={styles.screenTitle}>Admin Profile</Text>
         </View>
 
-        {/* Clean User Details Card */}
+        {/* User Details Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
             <Ionicons name="person" size={28} color="#38BDF8" />
@@ -288,9 +347,7 @@ export default function Profile() {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() =>
-            handleActionAlert("Edit Profile", "Edit profile screen opened.")
-          }
+          onPress={openEditModal}
           activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
@@ -298,9 +355,9 @@ export default function Profile() {
               <Ionicons name="create" size={16} color="#38BDF8" />
             </View>
             <View>
-              <Text style={styles.menuText}>Edit Profile</Text>
+              <Text style={styles.menuText}>Edit Profile & PG Name</Text>
               <Text style={styles.menuSubText}>
-                Update your personal details & phone
+                Update name, PG details & location
               </Text>
             </View>
           </View>
@@ -439,6 +496,105 @@ export default function Profile() {
         </TouchableOpacity>
       </ScrollView>
 
+      {/* Edit Profile Modal */}
+      <Modal
+        visible={isEditModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsEditModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setIsEditModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContainer, { padding: 24 }]}>
+                <View style={[styles.modalHeader, { marginBottom: 15 }]}>
+                  <Text style={styles.modalTitle}>
+                    Edit Profile & PG Details
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setIsEditModalVisible(false)}
+                  >
+                    <Ionicons name="close" size={18} color="#94A3B8" />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  <Text style={[styles.filterLabel, { marginTop: 4 }]}>
+                    FULL NAME
+                  </Text>
+                  <TextInput
+                    style={localStyles.inputField}
+                    placeholder="Enter full name"
+                    placeholderTextColor="#64748B"
+                    value={editFullName}
+                    onChangeText={setEditFullName}
+                  />
+
+                  <Text style={styles.filterLabel}>PHONE NUMBER</Text>
+                  <TextInput
+                    style={localStyles.inputField}
+                    placeholder="Enter phone number"
+                    placeholderTextColor="#64748B"
+                    keyboardType="phone-pad"
+                    value={editPhone}
+                    onChangeText={setEditPhone}
+                  />
+
+                  <Text style={styles.filterLabel}>PG PROPERTY NAME</Text>
+                  <TextInput
+                    style={localStyles.inputField}
+                    placeholder="Enter PG Name"
+                    placeholderTextColor="#64748B"
+                    value={editPgName}
+                    onChangeText={setEditPgName}
+                  />
+
+                  <Text style={styles.filterLabel}>STREET ADDRESS</Text>
+                  <TextInput
+                    style={localStyles.inputField}
+                    placeholder="Enter address"
+                    placeholderTextColor="#64748B"
+                    value={editAddress}
+                    onChangeText={setEditAddress}
+                  />
+
+                  <Text style={styles.filterLabel}>CITY / AREA</Text>
+                  <TextInput
+                    style={localStyles.inputField}
+                    placeholder="Enter city"
+                    placeholderTextColor="#64748B"
+                    value={editCity}
+                    onChangeText={setEditCity}
+                  />
+
+                  <TouchableOpacity
+                    style={[
+                      styles.downloadBtn,
+                      { backgroundColor: "#38BDF8", marginTop: 20 },
+                    ]}
+                    onPress={handleSaveProfile}
+                    disabled={isUpdating}
+                  >
+                    {isUpdating ? (
+                      <ActivityIndicator color="#0F172A" size="small" />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.downloadBtnText,
+                          { color: "#0F172A", fontWeight: "bold" },
+                        ]}
+                      >
+                        Save Changes
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </ScrollView>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
       {/* Subscription Modal */}
       <Modal
         visible={isSubModalVisible}
@@ -544,235 +700,20 @@ export default function Profile() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-
-      {/* Report Modal */}
-      <Modal
-        visible={isReportModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setIsReportModalVisible(false)}
-      >
-        <TouchableWithoutFeedback
-          onPress={() => setIsReportModalVisible(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalContainer}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>
-                    Download Filtered Report
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => setIsReportModalVisible(false)}
-                  >
-                    <Ionicons name="close" size={18} color="#94A3B8" />
-                  </TouchableOpacity>
-                </View>
-
-                <ScrollView
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ paddingBottom: 25 }}
-                >
-                  <Text style={styles.filterLabel}>
-                    SELECT PROPERTY / BRANCH
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.dropdownSelector}
-                    onPress={() =>
-                      setIsBranchDropdownOpen(!isBranchDropdownOpen)
-                    }
-                  >
-                    <Text style={styles.dropdownSelectorText}>
-                      {selectedBranch}
-                    </Text>
-                    <Ionicons
-                      name={
-                        isBranchDropdownOpen ? "chevron-up" : "chevron-down"
-                      }
-                      size={16}
-                      color="#94A3B8"
-                    />
-                  </TouchableOpacity>
-
-                  {isBranchDropdownOpen && (
-                    <View style={styles.dropdownList}>
-                      {adminProfile.branches.map((branch) => (
-                        <TouchableOpacity
-                          key={branch}
-                          style={[
-                            styles.dropdownItem,
-                            selectedBranch === branch &&
-                              styles.activeDropdownItem,
-                          ]}
-                          onPress={() => {
-                            setSelectedBranch(branch);
-                            setIsBranchDropdownOpen(false);
-                          }}
-                        >
-                          <Text
-                            style={[
-                              styles.dropdownItemText,
-                              selectedBranch === branch &&
-                                styles.activeDropdownItemText,
-                            ]}
-                          >
-                            {branch}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-
-                  <Text style={styles.filterLabel}>
-                    REPORT PERIOD (MONTH & YEAR)
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.datePickerTrigger}
-                    onPress={() => setShowDatePicker(true)}
-                  >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <Ionicons
-                        name="calendar-outline"
-                        size={18}
-                        color="#38BDF8"
-                      />
-                      <Text style={styles.datePickerTriggerText}>
-                        {formatMonthYear(selectedDate)}
-                      </Text>
-                    </View>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={16}
-                      color="#94A3B8"
-                    />
-                  </TouchableOpacity>
-
-                  {showDatePicker && (
-                    <DateTimePicker
-                      value={selectedDate}
-                      mode="date"
-                      display={Platform.OS === "ios" ? "spinner" : "default"}
-                      onChange={onDateChange}
-                    />
-                  )}
-
-                  <Text style={styles.filterLabel}>REPORT CATEGORY</Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.reportOptionCard,
-                      selectedReportType === "rent" &&
-                        styles.selectedReportOption,
-                    ]}
-                    onPress={() => setSelectedReportType("rent")}
-                  >
-                    <View style={styles.iconBg}>
-                      <Ionicons name="wallet" size={16} color="#F59E0B" />
-                    </View>
-                    <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text style={styles.reportOptTitle}>
-                        Rent Collection Report
-                      </Text>
-                      <Text style={styles.reportOptSub}>
-                        Overall paid & pending balances
-                      </Text>
-                    </View>
-                    {selectedReportType === "rent" && (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={18}
-                        color="#F59E0B"
-                      />
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.reportOptionCard,
-                      selectedReportType === "expense" &&
-                        styles.selectedReportOption,
-                    ]}
-                    onPress={() => setSelectedReportType("expense")}
-                  >
-                    <View style={styles.iconBg}>
-                      <Ionicons name="flash" size={16} color="#0EA5E9" />
-                    </View>
-                    <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text style={styles.reportOptTitle}>
-                        Utility & Expense Statement
-                      </Text>
-                      <Text style={styles.reportOptSub}>
-                        Electricity, maintenance & bills
-                      </Text>
-                    </View>
-                    {selectedReportType === "expense" && (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={18}
-                        color="#0EA5E9"
-                      />
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.reportOptionCard,
-                      selectedReportType === "tenants" &&
-                        styles.selectedReportOption,
-                    ]}
-                    onPress={() => setSelectedReportType("tenants")}
-                  >
-                    <View style={styles.iconBg}>
-                      <Ionicons name="people" size={16} color="#10B981" />
-                    </View>
-                    <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text style={styles.reportOptTitle}>
-                        Active Tenants Directory
-                      </Text>
-                      <Text style={styles.reportOptSub}>
-                        Occupancy details & contact directory
-                      </Text>
-                    </View>
-                    {selectedReportType === "tenants" && (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={18}
-                        color="#10B981"
-                      />
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.downloadBtn}
-                    onPress={generateAndDownloadPDF}
-                    disabled={isGenerating}
-                  >
-                    {isGenerating ? (
-                      <ActivityIndicator color="#FFFFFF" size="small" />
-                    ) : (
-                      <>
-                        <Ionicons
-                          name="download-outline"
-                          size={18}
-                          color="#FFFFFF"
-                        />
-                        <Text style={styles.downloadBtnText}>
-                          Download PDF Report
-                        </Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </ScrollView>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
     </SafeAreaView>
   );
 }
+
+const localStyles = {
+  inputField: {
+    backgroundColor: "#1E293B",
+    borderWidth: 1,
+    borderColor: "#334155",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: "#F8FAFC",
+    fontSize: 14,
+    marginBottom: 12,
+  },
+};

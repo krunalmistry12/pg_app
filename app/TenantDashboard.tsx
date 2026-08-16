@@ -93,6 +93,7 @@ export default function TenantDashboard() {
       if (rawData) {
         const formattedTenant: TenantProfile = {
           ...rawData,
+          id: rawData.id || rawData.Id || tenantService.getTenantId(), // 👈 Ensure ID is captured
           pgName: rawData.pgName || rawData.apartmentName || "Apartment",
           rentAmount: rawData.rentAmount || rawData.rent || 0,
           roomNumber: rawData.flatNumber
@@ -412,9 +413,7 @@ export default function TenantDashboard() {
         <View style={styles.grid}>
           <TouchableOpacity
             style={styles.gridItem}
-            onPress={() =>
-              Alert.alert("Complaint", "Raise issue feature is coming soon.")
-            }
+            onPress={() => router.push("/Tenantcomplaints" as any)} // 👈 Updated Route
             activeOpacity={0.8}
           >
             <View
@@ -670,7 +669,13 @@ export default function TenantDashboard() {
                   color="#94A3B8"
                   style={{ marginRight: 5 }}
                 />
-                <Text style={{ fontSize: 11.5, color: "#94A3B8", fontWeight: "500" }}>
+                <Text
+                  style={{
+                    fontSize: 11.5,
+                    color: "#94A3B8",
+                    fontWeight: "500",
+                  }}
+                >
                   {item.date}
                 </Text>
               </View>
@@ -737,7 +742,13 @@ export default function TenantDashboard() {
                     borderBottomColor: "rgba(255, 255, 255, 0.08)",
                   }}
                 >
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
                     <View
                       style={{
                         width: 36,
@@ -750,7 +761,11 @@ export default function TenantDashboard() {
                         borderColor: "rgba(56, 189, 248, 0.3)",
                       }}
                     >
-                      <Ionicons name="notifications" size={18} color="#38BDF8" />
+                      <Ionicons
+                        name="notifications"
+                        size={18}
+                        color="#38BDF8"
+                      />
                     </View>
                     <Text
                       style={{
@@ -784,7 +799,13 @@ export default function TenantDashboard() {
                         color="#64748B"
                         style={{ marginBottom: 12 }}
                       />
-                      <Text style={{ color: "#9CA3AF", fontSize: 14, fontWeight: "500" }}>
+                      <Text
+                        style={{
+                          color: "#9CA3AF",
+                          fontSize: 14,
+                          fontWeight: "500",
+                        }}
+                      >
                         No new notifications right now.
                       </Text>
                     </View>

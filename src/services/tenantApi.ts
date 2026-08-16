@@ -132,6 +132,7 @@ export const updateTenantStatusApi = async (
 };
 
 export interface TenantProfile {
+  id: number;
   name: string;
   roomNumber: string;
   rentAmount: number;
@@ -176,7 +177,6 @@ export const tenantService = {
       // 1. Fetch Tenant Profile
       const response = await api.get(`/Tenants/${tenantId}`);
       const resData = response.data?.data || response.data;
-
       let isPaid = resData?.isRentPaid === true;
       let finalTotalRent = resData?.rent || 0;
       let finalPaidAmount = 0;
@@ -223,6 +223,7 @@ export const tenantService = {
 
       if (resData) {
         return {
+          id: resData.Id,
           name: resData.name || "Tenant",
           roomNumber: `Flat ${resData.flatName || resData.flatNumber || "N/A"} - ${resData.roomName || ""} (${resData.bedName || ""})`,
           rentAmount: finalTotalRent,

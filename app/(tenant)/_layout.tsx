@@ -69,25 +69,6 @@ export default function TenantLayout() {
         }}
       />
 
-      {/* 3. Support / Maintenance Tab */}
-      <Tabs.Screen
-        name="maintenance"
-        options={{
-          title: "Support",
-          tabBarIcon: ({ color, focused }) => (
-            <View
-              style={[styles.iconContainer, focused && styles.activeIconBg]}
-            >
-              <Ionicons
-                name={focused ? "construct" : "construct-outline"}
-                size={22}
-                color={color}
-              />
-            </View>
-          ),
-        }}
-      />
-
       {/* 4. Profile Tab */}
       <Tabs.Screen
         name="profile"
