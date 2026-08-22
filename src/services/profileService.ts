@@ -12,7 +12,7 @@ export interface UpdateProfilePayload {
 export const profileService = {
   async updateProfile(payload: UpdateProfilePayload) {
     try {
-      const response = await api.put("/api/User/update-profile", payload);
+      const response = await api.put("/User/update-profile", payload);
       return response.data;
     } catch (error) {
       console.log("Error updating profile on server:", error);
@@ -22,7 +22,7 @@ export const profileService = {
 
   async fetchUserProfile(userId: string) {
     try {
-      const response = await api.get(`/api/User/${userId}`);
+      const response = await api.get(`/User/${userId}`);
       return response.data;
     } catch (error) {
       console.log("Error fetching profile from API:", error);

@@ -30,7 +30,7 @@ import { rentService } from "../src/services/rentService";
 import {
   getFlatsByUserIdApi,
   getTenantsByUserIdApi,
-} from "../src/services/tenantApi"; // Added getTenantsByUserIdApi
+} from "../src/services/tenantApi";
 
 const STORAGE_KEY = "@dashboard_cache_data";
 const FLATS_STORAGE_KEY = "flats_2bhk";
@@ -67,6 +67,11 @@ export default function ReportsScreenPro() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [adminName, setAdminName] = useState("Administrator");
 
+  // ✅ State for Dynamic PDF Header Details
+  const [adminPgName, setAdminPgName] = useState("My PG Property");
+  const [adminPhone, setAdminPhone] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminAddress, setAdminAddress] = useState("");
   useEffect(() => {
     loadUserData();
   }, []);
@@ -91,7 +96,15 @@ export default function ReportsScreenPro() {
       const data = await AsyncStorage.getItem(STORAGE_KEY);
       if (data) {
         const parsed = JSON.parse(data);
-        if (parsed.ownerName) setAdminName(parsed.ownerName);
+        if (parsed.ownerName || parsed.fullName) {
+          setAdminName(parsed.ownerName || parsed.fullName);
+        }
+        if (parsed.pgName) setAdminPgName(parsed.pgName);
+        if (parsed.phone) setAdminPhone(parsed.phone);
+        if (parsed.email) setAdminEmail(parsed.email);
+        if (parsed.address) {
+          setAdminAddress(parsed.address);
+        }
       }
     } catch (e) {
       console.log("Error loading config from cache", e);
@@ -158,8 +171,6 @@ export default function ReportsScreenPro() {
       }
 
       const storedUserId = await AsyncStorage.getItem("userId");
-      console.log("👉 Retrieved storedUserId:", storedUserId);
-
       if (!storedUserId) {
         setIsGenerating(false);
         Alert.alert(
@@ -171,14 +182,11 @@ export default function ReportsScreenPro() {
 
       let rawData: any[] = [];
 
-      // Fetch tenants and flats data using respective APIs
-      console.log("👉 Fetching tenants using getTenantsByUserIdApi...");
       const tenantsResponse = await getTenantsByUserIdApi(storedUserId);
       let apiTenantsArray = Array.isArray(tenantsResponse)
         ? tenantsResponse
         : tenantsResponse?.data || tenantsResponse?.tenants || [];
 
-      console.log("👉 Fetching flats using getFlatsByUserIdApi...");
       const flatsResponse = await getFlatsByUserIdApi(storedUserId);
       let apiFlatsArray = Array.isArray(flatsResponse)
         ? flatsResponse
@@ -204,7 +212,6 @@ export default function ReportsScreenPro() {
       }
 
       if (reportType === "rent") {
-        console.log("👉 Fetching rent records...");
         const rentResponse = await rentService.getAllRentRecords({
           month: startDate.getMonth() + 1,
           year: startDate.getFullYear().toString(),
@@ -248,8 +255,6 @@ export default function ReportsScreenPro() {
           });
         });
       } else if (reportType === "expense") {
-        console.log("👉 Fetching operational expenses via expenseService...");
-        // Pass current month string or identifier as needed
         const currentMonthQuery = startDate.toLocaleDateString("en-GB", {
           month: "short",
           year: "numeric",
@@ -257,11 +262,9 @@ export default function ReportsScreenPro() {
 
         const expenseArray =
           await expenseService.fetchExpenses(currentMonthQuery);
-        console.log("👉 Raw expenses response received:", expenseArray);
 
         if (Array.isArray(expenseArray)) {
           expenseArray.forEach((item: any) => {
-            // Match flat/branch name from flatId if available
             let branchName = "General Property";
             if (item.flatId && Array.isArray(apiFlatsArray)) {
               const matchedFlat = apiFlatsArray.find(
@@ -274,7 +277,6 @@ export default function ReportsScreenPro() {
               }
             }
 
-            // Filter by selected branch if not "All Flats"
             if (
               selectedBranch !== "All Flats" &&
               !branchName.includes(selectedBranch)
@@ -319,6 +321,9 @@ export default function ReportsScreenPro() {
                 status: tenantItem.status || "ACTIVE",
                 due: tenantItem.dueAmount ? `₹${tenantItem.dueAmount}` : "₹0",
                 flat: flatLabel,
+                deposit: tenantItem.depositAmount
+                  ? `₹${tenantItem.depositAmount}`
+                  : "₹0",
               };
 
               const tenantStatus = (tenantObj.status || "ACTIVE").toUpperCase();
@@ -344,8 +349,7 @@ export default function ReportsScreenPro() {
         }
       }
 
-      console.log("👉 Compiled rawData for report generation:", rawData);
-
+      // ✅ Pass Admin Profile properties into ReportFormatter
       const html = ReportFormatter.generateHTML({
         branch: selectedBranch,
         month: `${formatDateString(startDate)} to ${formatDateString(endDate)}`,
@@ -355,10 +359,13 @@ export default function ReportsScreenPro() {
         watermark: addWatermark,
         subFilter: reportType === "tenants" ? tenantSubFilter : undefined,
         tableData: rawData,
+        pgName: adminPgName,
+        phone: adminPhone,
+        email: adminEmail,
+        address: adminAddress,
       } as any);
 
       const file = await Print.printToFileAsync({ html });
-      console.log("👉 PDF Generated at URI:", file.uri);
       setIsGenerating(false);
 
       if (emailDispatch) {
@@ -378,7 +385,6 @@ export default function ReportsScreenPro() {
         Alert.alert("Success", `Report saved securely at: ${file.uri}`);
       }
     } catch (error: any) {
-      console.log("❌ Error during report generation:", error);
       setIsGenerating(false);
       Alert.alert(
         "Export Error",

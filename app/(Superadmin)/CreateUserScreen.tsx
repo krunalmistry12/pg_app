@@ -126,18 +126,13 @@ export default function UserDashboardScreen() {
     );
 
     try {
-      await userService.updateUserStatus(uId, newStatus, {
-        fullName: item.fullName || item.name || item.userName,
-        email: item.email,
-        phone: item.phone || item.phoneNumber || item.mobile,
-        roleId: item.roleId,
-        isActive: newStatus,
-      });
+      await userService.updateUserStatus(uId, newStatus, item);
     } catch (error: any) {
       console.error(
         "Toggle Status Error:",
         error?.response?.data || error.message,
       );
+      // Revert state back on failure
       setUsers((prev) =>
         prev.map((u) =>
           u.userId === uId || u.id === uId

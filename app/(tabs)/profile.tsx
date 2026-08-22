@@ -1,22 +1,19 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
-import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router"; // Added useFocusEffect to reload on return
+import React, { useCallback, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Modal,
   SafeAreaView,
   ScrollView,
   StatusBar,
   Text,
-  TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from "react-native";
-import { profileService } from "../../src/services/profileService";
 import { styles } from "../../src/styles/Admin/ProfileStyles ";
 
 interface AdminProfileData {
@@ -37,27 +34,11 @@ interface AdminProfileData {
 const STORAGE_KEY = "@dashboard_cache_data";
 
 export default function Profile() {
-  const [isReportModalVisible, setIsReportModalVisible] = useState(false);
   const [isSubModalVisible, setIsSubModalVisible] = useState(false);
   const [isSupportModalVisible, setIsSupportModalVisible] = useState(false);
 
-  // Edit Profile Modal States
-  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
-
-  // Editable Form State
-  const [editFullName, setEditFullName] = useState("");
-  const [editPhone, setEditPhone] = useState("");
-  const [editPgName, setEditPgName] = useState("");
-  const [editAddress, setEditAddress] = useState("");
-  const [editCity, setEditCity] = useState("");
-
-  const [selectedReportType, setSelectedReportType] = useState<
-    "rent" | "expense" | "tenants"
-  >("rent");
-
   const [adminProfile, setAdminProfile] = useState<AdminProfileData>({
-    userId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    userId: "",
     name: "Loading...",
     email: "",
     phone: "",
@@ -71,15 +52,12 @@ export default function Profile() {
     subscriptionExpiry: "Dec 31, 2026",
   });
 
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [selectedBranch, setSelectedBranch] = useState("Main Branch");
-  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-
-  useEffect(() => {
-    loadAdminDetails();
-  }, []);
+  // Reload admin details automatically whenever you navigate back from the edit screen
+  useFocusEffect(
+    useCallback(() => {
+      loadAdminDetails();
+    }, []),
+  );
 
   const fetchCurrentLocationArea = async (): Promise<string> => {
     try {
@@ -109,119 +87,33 @@ export default function Profile() {
   const loadAdminDetails = async () => {
     try {
       const storedData = await AsyncStorage.getItem(STORAGE_KEY);
-      const currentArea = await fetchCurrentLocationArea();
+      const standaloneUserId = await AsyncStorage.getItem("userId");
+      const realCurrentArea = await fetchCurrentLocationArea();
 
       if (storedData) {
         const parsed = JSON.parse(storedData);
+        const resolvedUserId =
+          standaloneUserId || parsed.userId || parsed.id || parsed._id || "";
+
         const mappedProfile: AdminProfileData = {
-          userId:
-            parsed.userId ||
-            parsed.id ||
-            "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-          name: parsed.ownerName || parsed.fullName || "Administrator",
-          email: parsed.email || "admin@pgproperty.com",
-          phone: parsed.phone || "+91 9876543210",
-          role: "PG Owner & Administrator",
-          pgName: parsed.pgName || "My PG Property",
-          location: parsed.city || parsed.location || currentArea,
+          userId: resolvedUserId,
+          name: parsed.ownerName || parsed.fullName || "",
+          email: parsed.email || "",
+          phone: parsed.phone || "",
+          role: parsed.role || "PG Administrator",
+          pgName: parsed.pgName || "",
+          location: parsed.city || parsed.location || realCurrentArea,
           address: parsed.address || "",
-          city: parsed.city || currentArea,
-          branches:
-            parsed.branches?.length > 0
-              ? parsed.branches
-              : ["Main Branch", "Branch 2"],
-          subscriptionPlan: parsed.subscriptionPlan || "Pro Business Plan",
-          subscriptionExpiry: parsed.subscriptionExpiry || "Dec 31, 2026",
+          city: parsed.city || realCurrentArea,
+          branches: parsed.branches || [],
+          subscriptionPlan: parsed.subscriptionPlan || "",
+          subscriptionExpiry: parsed.subscriptionExpiry || "",
         };
 
         setAdminProfile(mappedProfile);
-        if (mappedProfile.branches.length > 0) {
-          setSelectedBranch(mappedProfile.branches[0]);
-        }
-      } else {
-        const freshData: AdminProfileData = {
-          userId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-          name: "Administrator",
-          email: "admin@pgproperty.com",
-          phone: "+91 9876543210",
-          role: "PG Owner & Administrator",
-          pgName: "My PG Property",
-          location: currentArea,
-          address: "",
-          city: currentArea,
-          branches: ["Main Branch"],
-          subscriptionPlan: "Pro Business Plan",
-          subscriptionExpiry: "Dec 31, 2026",
-        };
-
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(freshData));
-        setAdminProfile(freshData);
-        setSelectedBranch("Main Branch");
       }
     } catch (e) {
       console.log("Error loading profile:", e);
-    }
-  };
-
-  const openEditModal = () => {
-    setEditFullName(adminProfile.name);
-    setEditPhone(adminProfile.phone);
-    setEditPgName(adminProfile.pgName);
-    setEditAddress(adminProfile.address);
-    setEditCity(adminProfile.city);
-    setIsEditModalVisible(true);
-  };
-
-  const handleSaveProfile = async () => {
-    if (!editFullName.trim() || !editPgName.trim()) {
-      Alert.alert("Validation Error", "Full Name and PG Name cannot be empty.");
-      return;
-    }
-
-    setIsUpdating(true);
-    try {
-      const payload = {
-        userId: adminProfile.userId,
-        fullName: editFullName,
-        email: adminProfile.email,
-        phone: editPhone,
-        pgName: editPgName,
-        address: editAddress,
-        city: editCity,
-      };
-
-      // Call API Endpoint (PUT /api/User/update-profile)
-      await profileService.updateProfile(payload);
-
-      // Update local state
-      const updatedProfile = {
-        ...adminProfile,
-        name: editFullName,
-        phone: editPhone,
-        pgName: editPgName,
-        address: editAddress,
-        city: editCity,
-        location: editCity,
-      };
-
-      setAdminProfile(updatedProfile);
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          ...updatedProfile,
-          ownerName: editFullName,
-        }),
-      );
-
-      setIsUpdating(false);
-      setIsEditModalVisible(false);
-      Alert.alert("Success", "Profile updated successfully!");
-    } catch (error: any) {
-      setIsUpdating(false);
-      Alert.alert(
-        "Update Failed",
-        error?.message || "Could not update profile details on server.",
-      );
     }
   };
 
@@ -233,6 +125,7 @@ export default function Profile() {
         style: "destructive",
         onPress: async () => {
           await AsyncStorage.removeItem("isLoggedIn");
+          await AsyncStorage.removeItem("userId");
           await AsyncStorage.removeItem(STORAGE_KEY);
           router.replace("/login");
         },
@@ -345,9 +238,10 @@ export default function Profile() {
         {/* Business Controls */}
         <Text style={styles.sectionHeading}>Management</Text>
 
+        {/* Routes to separate edit profile page */}
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={openEditModal}
+          onPress={() => router.push("/edit-profile" as any)}
           activeOpacity={0.8}
         >
           <View style={styles.menuLeft}>
@@ -357,7 +251,7 @@ export default function Profile() {
             <View>
               <Text style={styles.menuText}>Edit Profile & PG Name</Text>
               <Text style={styles.menuSubText}>
-                Update name, PG details & location
+                Update name, email, PG details & location
               </Text>
             </View>
           </View>
@@ -496,105 +390,6 @@ export default function Profile() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Edit Profile Modal */}
-      <Modal
-        visible={isEditModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setIsEditModalVisible(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setIsEditModalVisible(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={[styles.modalContainer, { padding: 24 }]}>
-                <View style={[styles.modalHeader, { marginBottom: 15 }]}>
-                  <Text style={styles.modalTitle}>
-                    Edit Profile & PG Details
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => setIsEditModalVisible(false)}
-                  >
-                    <Ionicons name="close" size={18} color="#94A3B8" />
-                  </TouchableOpacity>
-                </View>
-
-                <ScrollView showsVerticalScrollIndicator={false}>
-                  <Text style={[styles.filterLabel, { marginTop: 4 }]}>
-                    FULL NAME
-                  </Text>
-                  <TextInput
-                    style={localStyles.inputField}
-                    placeholder="Enter full name"
-                    placeholderTextColor="#64748B"
-                    value={editFullName}
-                    onChangeText={setEditFullName}
-                  />
-
-                  <Text style={styles.filterLabel}>PHONE NUMBER</Text>
-                  <TextInput
-                    style={localStyles.inputField}
-                    placeholder="Enter phone number"
-                    placeholderTextColor="#64748B"
-                    keyboardType="phone-pad"
-                    value={editPhone}
-                    onChangeText={setEditPhone}
-                  />
-
-                  <Text style={styles.filterLabel}>PG PROPERTY NAME</Text>
-                  <TextInput
-                    style={localStyles.inputField}
-                    placeholder="Enter PG Name"
-                    placeholderTextColor="#64748B"
-                    value={editPgName}
-                    onChangeText={setEditPgName}
-                  />
-
-                  <Text style={styles.filterLabel}>STREET ADDRESS</Text>
-                  <TextInput
-                    style={localStyles.inputField}
-                    placeholder="Enter address"
-                    placeholderTextColor="#64748B"
-                    value={editAddress}
-                    onChangeText={setEditAddress}
-                  />
-
-                  <Text style={styles.filterLabel}>CITY / AREA</Text>
-                  <TextInput
-                    style={localStyles.inputField}
-                    placeholder="Enter city"
-                    placeholderTextColor="#64748B"
-                    value={editCity}
-                    onChangeText={setEditCity}
-                  />
-
-                  <TouchableOpacity
-                    style={[
-                      styles.downloadBtn,
-                      { backgroundColor: "#38BDF8", marginTop: 20 },
-                    ]}
-                    onPress={handleSaveProfile}
-                    disabled={isUpdating}
-                  >
-                    {isUpdating ? (
-                      <ActivityIndicator color="#0F172A" size="small" />
-                    ) : (
-                      <Text
-                        style={[
-                          styles.downloadBtnText,
-                          { color: "#0F172A", fontWeight: "bold" },
-                        ]}
-                      >
-                        Save Changes
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                </ScrollView>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
-
       {/* Subscription Modal */}
       <Modal
         visible={isSubModalVisible}
@@ -703,17 +498,3 @@ export default function Profile() {
     </SafeAreaView>
   );
 }
-
-const localStyles = {
-  inputField: {
-    backgroundColor: "#1E293B",
-    borderWidth: 1,
-    borderColor: "#334155",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: "#F8FAFC",
-    fontSize: 14,
-    marginBottom: 12,
-  },
-};

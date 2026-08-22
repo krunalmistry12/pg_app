@@ -19,6 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { expenseService } from "../src/services/Utility/expenseEndpoints";
 
 const ALL_MONTHS = [
   "Jan",
@@ -62,6 +63,11 @@ interface PaymentRequestItem {
   status: string; // "PENDING", "APPROVED", "REJECTED"
 }
 
+interface PGBranch {
+  id: string | null;
+  name: string;
+}
+
 export default function GenerateRentPage() {
   const router = useRouter();
   const [initialLoading, setInitialLoading] = useState<boolean>(true);
@@ -76,10 +82,9 @@ export default function GenerateRentPage() {
     [],
   );
 
-  const [flatsList, setFlatsList] = useState<{ id: string; name: string }[]>(
-    [],
-  );
-  const [selectedFlatId, setSelectedFlatId] = useState<string>("ALL");
+  const [pgBranches, setPgBranches] = useState<PGBranch[]>([]);
+  const [selectedFlatId, setSelectedFlatId] = useState<string | null>(null);
+  const [loadingFlats, setLoadingFlats] = useState<boolean>(false);
 
   // Tabs: "PENDING", "GENERATED", or "REQUESTS"
   const [activeTab, setActiveTab] = useState<
@@ -120,10 +125,49 @@ export default function GenerateRentPage() {
     }
   }, [selectedMonth, selectedYear]);
 
+  const loadFlats = async () => {
+    try {
+      setLoadingFlats(true);
+      const flatList = await expenseService.fetchFlats();
+
+      if (Array.isArray(flatList) && flatList.length > 0) {
+        const dynamicFlats: PGBranch[] = flatList.map(
+          (flat: any, fIdx: number) => {
+            const flatId = String(flat.id || flat.Id || `flat-${fIdx}`);
+            const aptName =
+              flat.apartmentName || flat.ApartmentName || "Apartment";
+            const flatNumber =
+              flat.flatNumber || flat.FlatNumber || `Flat ${fIdx + 1}`;
+            return {
+              id: flatId,
+              name: `${aptName} (${flatNumber})`,
+            };
+          },
+        );
+
+        const updatedBranches = [
+          { id: null, name: "🏢 All Properties (Common)" },
+          ...dynamicFlats,
+        ];
+        setPgBranches(updatedBranches);
+      } else {
+        setPgBranches([{ id: null, name: "🏢 All Properties (Common)" }]);
+      }
+    } catch (error) {
+      console.log("Error loading flats layout:", error);
+      setPgBranches([{ id: null, name: "🏢 All Properties (Common)" }]);
+    } finally {
+      setLoadingFlats(false);
+    }
+  };
+
   const fetchInitialData = async (isFirstLoad = false) => {
     try {
       if (isFirstLoad) setInitialLoading(true);
       else setRefreshing(true);
+
+      // Load dynamic property branches in parallel or sequence
+      await loadFlats();
 
       const userId = await getUserId();
       if (!userId) {
@@ -158,12 +202,6 @@ export default function GenerateRentPage() {
       }));
 
       setTenants(list);
-
-      const uniqueFlatsMap = new Map();
-      list.forEach((t) => {
-        if (t.flatId) uniqueFlatsMap.set(t.flatId, t.flatName);
-      });
-      setFlatsList(Array.from(uniqueFlatsMap, ([id, name]) => ({ id, name })));
 
       try {
         const recordsResponse = await api.get("/Rent/admin/all-records", {
@@ -293,9 +331,10 @@ export default function GenerateRentPage() {
     setGeneratedTenantIds(["t3"]);
     setSelectedTenantIds(["t1", "t2"]);
     setPaymentRequests(dummyRequests);
-    setFlatsList([
-      { id: "f1", name: "Sunrise Luxury PG" },
-      { id: "f2", name: "Green Park Hostel" },
+    setPgBranches([
+      { id: null, name: "🏢 All Properties (Common)" },
+      { id: "f1", name: "Sunrise Luxury PG (1)" },
+      { id: "f2", name: "Green Park Hostel (2)" },
     ]);
     setInitialLoading(false);
     setRefreshing(false);
@@ -354,7 +393,7 @@ export default function GenerateRentPage() {
   };
 
   const filteredTenants = tenants.filter((t) => {
-    const matchesFlat = selectedFlatId === "ALL" || t.flatId === selectedFlatId;
+    const matchesFlat = selectedFlatId === null || t.flatId === selectedFlatId;
     const isBilled = generatedTenantIds.includes(t.id);
     return activeTab === "PENDING"
       ? matchesFlat && !isBilled
@@ -397,7 +436,6 @@ export default function GenerateRentPage() {
     });
   };
 
-  // Function to send WhatsApp with Email fallback
   const sendRentNotificationToTenant = async (
     tenant: TenantItem,
     amount: number,
@@ -406,11 +444,10 @@ export default function GenerateRentPage() {
 
     let whatsappSent = false;
 
-    // 1. Try sending via WhatsApp first
     if (tenant.phone) {
       let formattedPhone = tenant.phone.replace(/\D/g, "");
       if (formattedPhone.length === 10) {
-        formattedPhone = "91" + formattedPhone; // Assuming India country code
+        formattedPhone = "91" + formattedPhone;
       }
       const whatsappUrl = `whatsapp://send?phone=${formattedPhone}&text=${encodeURIComponent(message)}`;
 
@@ -425,7 +462,6 @@ export default function GenerateRentPage() {
       }
     }
 
-    // 2. Fallback to Email if WhatsApp failed or phone is missing
     if (!whatsappSent && tenant.email) {
       const emailSubject = `Rent Bill Generated - ${selectedMonth} ${selectedYear}`;
       const emailUrl = `mailto:${tenant.email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(message)}`;
@@ -456,7 +492,6 @@ export default function GenerateRentPage() {
       const monthIndex = ALL_MONTHS.indexOf(selectedMonth) + 1;
       const yearNum = Number(selectedYear);
 
-      // Map selected tenants for API & notification triggers
       const selectedTenantObjects = tenants.filter((t) =>
         selectedTenantIds.includes(t.id),
       );
@@ -467,7 +502,6 @@ export default function GenerateRentPage() {
 
       await Promise.all(promises);
 
-      // Trigger WhatsApp/Email notification for each successfully billed tenant
       for (const tenant of selectedTenantObjects) {
         await sendRentNotificationToTenant(tenant, tenant.monthlyRent);
       }
@@ -566,49 +600,30 @@ export default function GenerateRentPage() {
         </ScrollView>
       </View>
 
-      {/* Property Filter Chips */}
-      {flatsList.length > 0 && (
+      {/* Dynamic Property Filter Chips (Using loaded pgBranches) */}
+      {pgBranches.length > 0 && (
         <View style={styles.pgFilterSection}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ gap: 8 }}
           >
-            <TouchableOpacity
-              style={[
-                styles.pgPill,
-                selectedFlatId === "ALL" && styles.pgPillSelected,
-              ]}
-              onPress={() => setSelectedFlatId("ALL")}
-            >
-              <Text
-                style={[
-                  styles.pgText,
-                  selectedFlatId === "ALL" && styles.pgTextSelected,
-                ]}
-              >
-                🏢 All Properties
-              </Text>
-            </TouchableOpacity>
-            {flatsList.map((flat) => (
-              <TouchableOpacity
-                key={flat.id}
-                style={[
-                  styles.pgPill,
-                  selectedFlatId === flat.id && styles.pgPillSelected,
-                ]}
-                onPress={() => setSelectedFlatId(flat.id)}
-              >
-                <Text
-                  style={[
-                    styles.pgText,
-                    selectedFlatId === flat.id && styles.pgTextSelected,
-                  ]}
+            {pgBranches.map((branch) => {
+              const isSelected = selectedFlatId === branch.id;
+              return (
+                <TouchableOpacity
+                  key={branch.id === null ? "all-branch" : branch.id}
+                  style={[styles.pgPill, isSelected && styles.pgPillSelected]}
+                  onPress={() => setSelectedFlatId(branch.id)}
                 >
-                  🏠 {flat.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Text
+                    style={[styles.pgText, isSelected && styles.pgTextSelected]}
+                  >
+                    {branch.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         </View>
       )}
@@ -1193,8 +1208,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#1E293B",
   },
-  generateButton: { 
-    backgroundColor: "#25D366", // WhatsApp Green Accent
+  generateButton: {
+    backgroundColor: "#25D366",
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: "center",

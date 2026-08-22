@@ -7,6 +7,11 @@ export interface ReportOptions {
   watermark: boolean;
   subFilter?: "all" | "active" | "notice" | "defaulters";
   tableData?: any[];
+  // ✅ Added fields for dynamic company/admin details including address
+  pgName?: string;
+  phone?: string;
+  email?: string;
+  address?: string; // 👈 Added address field here
 }
 
 export class ReportFormatter {
@@ -20,14 +25,11 @@ export class ReportFormatter {
       watermark,
       subFilter,
       tableData = [],
+      pgName = "PG Management Enterprise Hub",
+      phone = "",
+      email = "",
+      address = "",
     } = options;
-
-    // --- Yahan par aap check kar sakte hain ki API se kya data aa raha hai ---
-    console.log("--- REPORT FORMATTER DEBUG ---");
-    console.log("Report Type:", reportType);
-    console.log("Received tableData:", tableData);
-    console.log("Total Records Count:", tableData.length);
-    console.log("------------------------------");
 
     const moduleConfig = {
       rent: {
@@ -57,7 +59,6 @@ export class ReportFormatter {
       </tr>
     `;
 
-    // Calculate dynamic totals for numeric columns
     const calculateTotal = (key: string) => {
       return tableData.reduce((acc, row) => {
         const val = parseFloat(String(row[key]).replace(/[^0-9.-]+/g, ""));
@@ -112,7 +113,7 @@ export class ReportFormatter {
             margin-bottom: 25px;
           }
           .company-info h1 { font-size: 18px; font-weight: 800; color: #111827; }
-          .company-info p { font-size: 11px; color: #6B7280; margin-top: 3px; }
+          .company-info p { font-size: 11px; color: #6B7280; margin-top: 3px; line-height: 1.4; }
           .report-badge {
             background-color: ${currentConfig.badgeBg};
             color: ${currentConfig.color};
@@ -189,8 +190,14 @@ export class ReportFormatter {
 
         <div class="header">
           <div class="company-info">
-            <h1>PG Management Enterprise Hub</h1>
-            <p>Automated Property Operations & Financial Intelligence</p>
+            <!-- ✅ Dynamic PG Name, Address, Phone, & Email rendered neatly -->
+            <h1>${pgName}</h1>
+            ${address ? `<p>${address}</p>` : ""}
+            <p>
+              ${phone ? `Phone: ${phone}` : ""}
+              ${phone && email ? ` | ` : ""}
+              ${email ? `Email: ${email}` : ""}
+            </p>
           </div>
           <div>
             <div class="report-badge">${currentConfig.title}</div>
@@ -355,7 +362,7 @@ export class ReportFormatter {
           <div class="signatory-box">
             <div class="signature-line"></div>
             <div class="signatory-title">Authorized Signatory</div>
-            <div class="signatory-sub">PG Management System</div>
+            <div class="signatory-sub">${pgName}</div>
           </div>
         </div>
 
